@@ -1,0 +1,2543 @@
+/* ============================================================
+   DialSpace v4 — Main Logic
+   ============================================================ */
+
+// ─── Default state ─────────────────────────────────────────
+const DEFAULT_STATE = () => ({
+  groups: [
+    { id: 'home', name: 'HOME', isHome: true, dials: [] },
+    { id: uid(), name: 'Main', dials: [] }
+  ],
+  activeGroup: 'home',
+  settings: {
+    bgType: 'stars',
+    bgColor: '#07070e',
+    bgImage: null,
+    overlayOp: 0.35,
+    weatherCity: 'Dublin',
+    tempUnit: 'celsius',
+    cols: 5,
+    dialShape: 'wide',
+    showLabel: true,
+    showFavicon: true,
+    showFooter: true,
+    hoverZoom: true,
+    glass: true,
+    showBorder: true,
+    dialIconScale: 100,
+    showAddDialButton: true,
+    showClock: true,
+    use24h: true,
+    showSeconds: false,
+    showWeather: true,
+    showWeatherForecast: true,
+    weatherForecastDays: 7,
+    showPlayer: true,
+    showNotes: true,
+    musicLeave: 'stop',
+    autoplay: false,
+    loopPlaylist: true,
+    shuffleOnStart: false,
+    blockedDomains: 'youtube.com\ntiktok.com\ntwitter.com\nx.com\ninstagram.com\nfacebook.com\nreddit.com\nnetflix.com\ntwitch.tv\ntumblr.com\npinterest.com'
+  },
+  notes: '',
+  player: {
+    playlist: [],
+    currentIdx: 0,
+    shuffle: false,
+    repeat: false,
+    volume: 1,
+    position: 0
+  }
+});
+
+let state = DEFAULT_STATE();
+let ctxDialId = null;
+let editingDialId = null;
+let editingTabId = null;
+let selectedIconUrl = null;
+let iconSearchSource = 'duckduckgo';
+let focusSession = null; // { endTime, blockedGroups, blockedDomains, name, hardBlock, showTimer, intervalId }
+let lastClockText = '';
+let viewTransitionTimer = null;
+
+function getIconScale(value, fallback = 100) {
+  const scale = Number(value);
+  return Number.isFinite(scale) ? scale : fallback;
+}
+let ctxHideTimer = null;
+let starsAnimationFrame = null;
+let starsResizeTimer = null;
+const MODAL_CLOSE_MS = 280;
+const CLOCK_ANIM_MS = 420;
+const AUTO_BACKUP_DEBOUNCE_MS = 1800;
+
+// ─── Audio engine ──────────────────────────────────────────
+const audio = new Audio();
+audio.preload = 'metadata';
+let playerSeeking = false;
+let wasPlayingBeforeSeek = false;
+
+// ─── Drag & Drop state ─────────────────────────────────────
+let draggingDialId = null;
+let draggingTabId = null;
+let isSelectingCtxText = false;
+const DIAL_DRAG_MIME = 'application/x-dialspace-dial';
+const TAB_DRAG_MIME = 'application/x-dialspace-tab';
+
+// ─── Notes debounce ────────────────────────────────────────
+let notesSaveTimer = null;
+let autoBackupTimer = null;
+let pendingBackupSnapshot = null;
+let lastBackupFingerprint = '';
+let lastPromptFingerprint = '';
+let backupPromptVisible = false;
+
+// ─── Init ───────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadState();
+  // Establish baseline so prompt does not appear right after startup.
+  lastBackupFingerprint = JSON.stringify(makeBackupFingerprintSource(state));
+  setupOverlayPanels();
+  applySettings(true);
+  buildTabs();
+  showView(state.activeGroup);
+  startClock();
+  fetchWeather();
+  drawStars();
+  bindAll();
+  restorePlayer();
+  restoreFocus();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('load', () => {
+    requestAnimationFrame(() => requestAnimationFrame(updateTabsActivePill));
+  }, { once: true });
+  document.fonts?.ready?.then(() => {
+    requestAnimationFrame(() => requestAnimationFrame(updateTabsActivePill));
+  });
+});
+
+// ─── Persistence ────────────────────────────────────────────
+function saveState(options = {}) {
+  const { scheduleBackup = true } = options;
+  const s = JSON.parse(JSON.stringify(state));
+  s.player.playlist = s.player.playlist.map(t => ({
+    name: t.name, artist: t.artist || '',
+    type: t.type,
+    src: t.type === 'url' ? t.src : null
+  })).filter(t => t.type === 'url' || t.src);
+  chrome.storage.local.set({ ds2: s });
+  if (scheduleBackup) scheduleBackupPrompt(s);
+}
+
+function buildExportableState(snapshot) {
+  const copy = JSON.parse(JSON.stringify(snapshot));
+  if (copy.player?.playlist) {
+    copy.player.playlist = copy.player.playlist.filter(t => t.type === 'url');
+  }
+  return copy;
+}
+
+function makeBackupFingerprintSource(snapshot) {
+  // Ignore transient/UI-only changes to avoid noisy backup prompts.
+  const copy = buildExportableState(snapshot);
+  delete copy.activeGroup;
+  if (copy.player) delete copy.player.position;
+  return copy;
+}
+
+function scheduleBackupPrompt(snapshot) {
+  if (!chrome.downloads?.download) return;
+  const exportState = buildExportableState(snapshot);
+  const fingerprint = JSON.stringify(makeBackupFingerprintSource(snapshot));
+  if (fingerprint === lastBackupFingerprint) return;
+  if (fingerprint === lastPromptFingerprint) return;
+  pendingBackupSnapshot = exportState;
+  clearTimeout(autoBackupTimer);
+  if (backupPromptVisible) return;
+  autoBackupTimer = setTimeout(() => {
+    showBackupPrompt();
+  }, AUTO_BACKUP_DEBOUNCE_MS);
+}
+
+function showBackupPrompt() {
+  const toast = document.getElementById('backup-toast');
+  if (!toast || !pendingBackupSnapshot) return;
+  lastPromptFingerprint = JSON.stringify(makeBackupFingerprintSource(pendingBackupSnapshot));
+  toast.style.display = 'flex';
+  backupPromptVisible = true;
+}
+
+function hideBackupPrompt() {
+  const toast = document.getElementById('backup-toast');
+  if (!toast) return;
+  toast.style.display = 'none';
+  backupPromptVisible = false;
+}
+
+function saveBackupToFile() {
+  if (!chrome.downloads?.download || !pendingBackupSnapshot) return;
+  const payload = JSON.stringify(pendingBackupSnapshot, null, 2);
+  const blob = new Blob([payload], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  chrome.downloads.download({
+    url,
+    filename: 'SpaceDial/auto-backup-latest.json',
+    saveAs: false,
+    conflictAction: 'overwrite'
+  }, () => {
+    URL.revokeObjectURL(url);
+  });
+  lastBackupFingerprint = JSON.stringify(makeBackupFingerprintSource(pendingBackupSnapshot));
+  lastPromptFingerprint = '';
+  hideBackupPrompt();
+}
+
+async function loadState() {
+  return new Promise(res => {
+    chrome.storage.local.get('ds2', r => {
+      if (r.ds2) {
+        const saved = r.ds2;
+        state.groups = normalizeGroupsWithHome(saved.groups || state.groups);
+        state.activeGroup = saved.activeGroup || state.groups[0].id;
+        state.settings = { ...DEFAULT_STATE().settings, ...(saved.settings || {}) };
+        state.player = { ...DEFAULT_STATE().player, ...(saved.player || {}) };
+        state.notes = saved.notes || '';
+        if (!state.groups.some(g => g.id === state.activeGroup)) state.activeGroup = 'home';
+      }
+      res();
+    });
+  });
+}
+
+function uid() { return Math.random().toString(36).slice(2, 10); }
+
+function normalizeGroupsWithHome(groups) {
+  const normalizedGroups = Array.isArray(groups) ? groups.map(group => ({
+    ...group,
+    dials: Array.isArray(group?.dials) ? group.dials.map(dial => normalizeDial(dial)).filter(Boolean) : []
+  })) : [];
+
+  const homeCandidates = normalizedGroups.filter(group =>
+    group?.isHome || group?.id === 'home' || String(group?.name || '').trim().toUpperCase() === 'HOME'
+  );
+  const primaryHome = homeCandidates[0];
+  const homeGroup = {
+    ...(primaryHome || {}),
+    id: 'home',
+    name: 'HOME',
+    isHome: true,
+    dials: []
+  };
+
+  const usedIds = new Set(['home']);
+  const regularGroups = normalizedGroups
+    .filter(group => group && group !== primaryHome)
+    .map(group => {
+      const nextGroup = { ...group, isHome: false };
+      if (nextGroup.id === 'home' || usedIds.has(nextGroup.id)) nextGroup.id = uid();
+      usedIds.add(nextGroup.id);
+      return nextGroup;
+    });
+
+  return [homeGroup, ...regularGroups];
+}
+
+// ─── Apply settings to DOM ──────────────────────────────────
+function applySettings(initial) {
+  const s = state.settings;
+  const root = document.documentElement;
+
+  // Background
+  const bgLayer = document.getElementById('bg-layer');
+  const starsCanvas = document.getElementById('stars-canvas');
+  if (s.bgType === 'stars') {
+    bgLayer.style.backgroundImage = '';
+    bgLayer.style.background = '';
+    starsCanvas.style.display = 'block';
+  } else if (s.bgType === 'solid') {
+    bgLayer.style.background = s.bgColor;
+    bgLayer.style.backgroundImage = '';
+    starsCanvas.style.display = 'none';
+  } else if (s.bgType === 'image' && s.bgImage) {
+    bgLayer.style.backgroundImage = `url(${s.bgImage})`;
+    bgLayer.style.backgroundSize = 'cover';
+    bgLayer.style.backgroundPosition = 'center';
+    bgLayer.style.background = '';
+    starsCanvas.style.display = 'none';
+  }
+
+  root.style.setProperty('--overlay-op', s.overlayOp);
+  root.style.setProperty('--cols', s.cols);
+  root.style.setProperty('--dial-icon-scale', `${getIconScale(s.dialIconScale) / 100}`);
+
+  // Dial shape — proper aspect-ratio values
+  const ratios = { wide: '16/9', square: '1/1', tall: '3/4' };
+  root.style.setProperty('--dial-aspect', ratios[s.dialShape] || '16/9');
+
+  // Dial appearance
+  document.querySelectorAll('.dial-card:not(.dial-add)').forEach(c => {
+    c.classList.toggle('no-border', !s.showBorder);
+    c.classList.toggle('no-glass', !s.glass);
+    c.classList.toggle('no-zoom', !s.hoverZoom);
+    c.querySelectorAll('.dial-label').forEach(l => l.classList.toggle('hidden', !s.showLabel));
+    c.querySelectorAll('.dial-favicon,.dial-letter').forEach(i => i.style.display = s.showFavicon ? '' : 'none');
+  });
+
+  // Widget visibility
+  document.getElementById('clock-block').style.display = s.showClock ? '' : 'none';
+  document.getElementById('weather-block').style.display = s.showWeather ? '' : 'none';
+  document.getElementById('weather-forecast').style.display = s.showWeather && s.showWeatherForecast ? '' : 'none';
+  document.getElementById('player-block').style.display = s.showPlayer ? '' : 'none';
+  document.getElementById('notes-block').style.display = s.showNotes ? '' : 'none';
+  const addDialCard = document.querySelector('#dials-grid .dial-add');
+  if (addDialCard) addDialCard.style.display = s.showAddDialButton ? '' : 'none';
+
+  // Player state
+  document.getElementById('btn-shuffle').classList.toggle('on', state.player.shuffle);
+  document.getElementById('btn-repeat').classList.toggle('on', state.player.repeat);
+  document.getElementById('player-vol').value = state.player.volume;
+  audio.volume = state.player.volume;
+
+  // Notes content
+  const notesArea = document.getElementById('notes-area');
+  if (notesArea && initial) notesArea.value = state.notes || '';
+}
+
+// ─── Stars ──────────────────────────────────────────────────
+function drawStars() {
+  const c = document.getElementById('stars-canvas');
+  if (starsAnimationFrame) {
+    cancelAnimationFrame(starsAnimationFrame);
+    starsAnimationFrame = null;
+  }
+  c.width = window.innerWidth;
+  c.height = window.innerHeight;
+  if (state.settings.bgType !== 'stars') {
+    c.style.display = 'none';
+    return;
+  }
+
+  const ctx = c.getContext('2d');
+  const count = Math.min(260, Math.max(120, Math.round((c.width * c.height) / 9000)));
+  const travelBase = Math.max(240, c.width * 0.22);
+  const parallaxAmp = Math.max(6, Math.min(20, c.width * 0.008));
+  const stars = Array.from({ length: count }, () => {
+    const targetX = Math.random() * c.width;
+    const targetY = Math.random() * c.height;
+    const fromLeft = Math.random() > 0.5;
+    const driftY = (Math.random() - 0.5) * c.height * 0.18;
+    const startX = fromLeft ? -travelBase - Math.random() * (c.width * 0.18) : c.width + travelBase + Math.random() * (c.width * 0.18);
+    const startY = targetY + driftY;
+    return {
+      targetX,
+      targetY,
+      startX,
+      startY,
+      radius: Math.random() * 1.3 + 0.15,
+      alpha: Math.random() * 0.75 + 0.08,
+      delay: Math.random() * 260,
+      duration: 900 + Math.random() * 850,
+      twinkleSpeed: 0.0008 + Math.random() * 0.0018,
+      twinkleOffset: Math.random() * Math.PI * 2,
+      parallaxX: (Math.random() - 0.5) * parallaxAmp,
+      parallaxY: (Math.random() - 0.5) * parallaxAmp,
+      trail: 8 + Math.random() * 18
+    };
+  });
+  let nextCometAt = performance.now() + 1800 + Math.random() * 2800;
+  let comet = null;
+
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+  const startTime = performance.now();
+
+  function render(now) {
+    if (state.settings.bgType !== 'stars') {
+      ctx.clearRect(0, 0, c.width, c.height);
+      starsAnimationFrame = null;
+      return;
+    }
+
+    ctx.clearRect(0, 0, c.width, c.height);
+    const settled = Math.max(0, Math.min(1, (now - startTime - 600) / 1800));
+    const driftTime = (now - startTime) * 0.001;
+
+    for (const star of stars) {
+      const elapsed = now - startTime - star.delay;
+      const progress = Math.max(0, Math.min(1, elapsed / star.duration));
+      const eased = easeOutCubic(progress);
+      const baseX = star.startX + (star.targetX - star.startX) * eased;
+      const baseY = star.startY + (star.targetY - star.startY) * eased;
+      const driftX = Math.sin(driftTime * 0.8 + star.twinkleOffset) * star.parallaxX * settled;
+      const driftY = Math.cos(driftTime * 0.65 + star.twinkleOffset * 1.3) * star.parallaxY * settled;
+      const x = baseX + driftX;
+      const y = baseY + driftY;
+      const twinkle = 0.72 + ((Math.sin(now * star.twinkleSpeed + star.twinkleOffset) + 1) * 0.5) * 0.42;
+      const opacity = star.alpha * Math.max(0, Math.min(1, progress * 1.25)) * twinkle;
+
+      if (progress < 1) {
+        const trailX = x - (star.targetX - star.startX) * 0.018;
+        const trailY = y - (star.targetY - star.startY) * 0.018;
+        const grad = ctx.createLinearGradient(trailX - star.trail, trailY, x, y);
+        grad.addColorStop(0, 'rgba(255,255,255,0)');
+        grad.addColorStop(1, `rgba(255,255,255,${opacity * 0.35})`);
+        ctx.beginPath();
+        ctx.moveTo(trailX - star.trail, trailY);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = Math.max(0.4, star.radius * 0.9);
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.arc(x, y, star.radius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${opacity})`;
+      ctx.fill();
+    }
+
+    if (!comet && now >= nextCometAt) {
+      const startX = -80 - Math.random() * 120;
+      const startY = 20 + Math.random() * Math.max(80, c.height * 0.2);
+      const endX = c.width + 180;
+      const endY = startY + 90 + Math.random() * Math.max(140, c.height * 0.22);
+      comet = {
+        startAt: now,
+        duration: 1700 + Math.random() * 800,
+        startX,
+        startY,
+        endX,
+        endY,
+        size: 1.8 + Math.random() * 1.8,
+        tail: 120 + Math.random() * 80
+      };
+      nextCometAt = now + 7000 + Math.random() * 12000;
+    }
+
+    if (comet) {
+      const progress = Math.max(0, Math.min(1, (now - comet.startAt) / comet.duration));
+      const eased = easeOutCubic(progress);
+      const x = comet.startX + (comet.endX - comet.startX) * eased;
+      const y = comet.startY + (comet.endY - comet.startY) * eased;
+      const angle = Math.atan2(comet.endY - comet.startY, comet.endX - comet.startX);
+      const tailX = x - Math.cos(angle) * comet.tail;
+      const tailY = y - Math.sin(angle) * comet.tail;
+      const grad = ctx.createLinearGradient(tailX, tailY, x, y);
+      grad.addColorStop(0, 'rgba(180,220,255,0)');
+      grad.addColorStop(0.45, 'rgba(180,220,255,0.08)');
+      grad.addColorStop(1, 'rgba(255,255,255,0.95)');
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(x, y);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = comet.size * 1.25;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(x, y, comet.size, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.98)';
+      ctx.shadowBlur = 18;
+      ctx.shadowColor = 'rgba(180,220,255,0.85)';
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      if (progress >= 1) comet = null;
+    }
+
+    starsAnimationFrame = requestAnimationFrame(render);
+  }
+
+  starsAnimationFrame = requestAnimationFrame(render);
+}
+
+// ─── Clock ──────────────────────────────────────────────────
+const DAYS = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
+const MONTHS = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
+
+function startClock() { updateClock(); setInterval(updateClock, 1000); }
+
+function formatClockText(now) {
+  const s = state.settings;
+  let hh = now.getHours(), mm = now.getMinutes(), ss = now.getSeconds();
+  if (!s.use24h) {
+    const ampm = hh >= 12 ? 'PM' : 'AM';
+    hh = hh % 12 || 12;
+    return `- ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}${s.showSeconds ? ':'+String(ss).padStart(2,'0') : ''} ${ampm} -`;
+  }
+  return `- ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}${s.showSeconds ? ':'+String(ss).padStart(2,'0') : ''} -`;
+}
+
+function isStaticTimeChar(char) {
+  return /[\s:-]/.test(char);
+}
+
+function buildTimeSlot(char) {
+  const slot = document.createElement('span');
+  slot.className = 'time-slot' + (isStaticTimeChar(char) ? ' static' : '');
+  slot.dataset.char = char;
+  const inner = document.createElement('span');
+  inner.className = 'time-slot-char';
+  inner.textContent = char;
+  slot.appendChild(inner);
+  return slot;
+}
+
+function renderClockText(text) {
+  const timeLine = document.getElementById('time-line');
+  const chars = Array.from(text);
+
+  if (!timeLine.children.length || timeLine.children.length !== chars.length) {
+    timeLine.innerHTML = '';
+    chars.forEach(char => timeLine.appendChild(buildTimeSlot(char)));
+    lastClockText = text;
+    return;
+  }
+
+  chars.forEach((char, idx) => {
+    const slot = timeLine.children[idx];
+    if (!slot || slot.dataset.char === char) return;
+
+    if (isStaticTimeChar(char)) {
+      slot.className = 'time-slot static';
+      slot.dataset.char = char;
+      slot.innerHTML = '';
+      const inner = document.createElement('span');
+      inner.className = 'time-slot-char';
+      inner.textContent = char;
+      slot.appendChild(inner);
+      return;
+    }
+
+    const previous = document.createElement('span');
+    previous.className = 'time-slot-char';
+    previous.textContent = slot.dataset.char || '';
+
+    const next = document.createElement('span');
+    next.className = 'time-slot-char';
+    next.textContent = char;
+
+    slot.className = 'time-slot';
+    slot.dataset.char = char;
+    slot.innerHTML = '';
+    slot.classList.add('leaving', 'entering');
+    slot.append(previous, next);
+    setTimeout(() => {
+      slot.classList.remove('leaving', 'entering');
+      slot.innerHTML = '';
+      slot.appendChild(next);
+    }, CLOCK_ANIM_MS);
+  });
+
+  lastClockText = text;
+}
+
+function updateClock() {
+  const now = new Date();
+  document.getElementById('day-name').textContent = DAYS[now.getDay()];
+  document.getElementById('date-line').textContent =
+    String(now.getDate()).padStart(2,'0') + '  ' + MONTHS[now.getMonth()] + ',  ' + now.getFullYear() + '.';
+  const nextClockText = formatClockText(now);
+  if (lastClockText !== nextClockText) renderClockText(nextClockText);
+}
+
+// ─── Weather ────────────────────────────────────────────────
+async function fetchWeather() {
+  if (!state.settings.showWeather) return;
+  const city = state.settings.weatherCity || 'Dublin';
+  try {
+    const geo = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`);
+    const gd = await geo.json();
+    if (!gd.results?.length) return;
+    const { latitude: lat, longitude: lon, name, country } = gd.results[0];
+    const unit = state.settings.tempUnit === 'fahrenheit' ? 'fahrenheit' : 'celsius';
+    const forecastDays = state.settings.showWeatherForecast ? normalizeForecastDays(state.settings.weatherForecastDays) : 1;
+    const dailyParams = state.settings.showWeatherForecast
+      ? '&daily=weather_code,temperature_2m_max,temperature_2m_min'
+      : '';
+    const wx = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weathercode,is_day&temperature_unit=${unit}&forecast_days=${forecastDays}${dailyParams}`);
+    const wd = await wx.json();
+    const temp = Math.round(wd.current.temperature_2m);
+    const code = wd.current.weathercode;
+    const isNight = Number(wd.current?.is_day) === 0;
+    document.getElementById('weather-city').textContent = `${name.toUpperCase()}, ${country.toUpperCase()}`;
+    document.getElementById('weather-desc').textContent = wmoDesc(code) + '  ' + temp + (unit === 'fahrenheit' ? '°F' : '°C');
+    document.getElementById('weather-icon').className = `${wmoIcon(code)}${isNight ? ' night' : ''}`.trim();
+    renderWeatherForecast(wd.daily, unit);
+  } catch(e) {
+    document.getElementById('weather-city').textContent = city.toUpperCase();
+    document.getElementById('weather-desc').textContent = 'UNAVAILABLE';
+    document.getElementById('weather-forecast').innerHTML = '';
+  }
+}
+function normalizeForecastDays(value) {
+  return Number(value) === 16 ? 16 : 7;
+}
+function renderWeatherForecast(daily, unit) {
+  const wrap = document.getElementById('weather-forecast');
+  if (!state.settings.showWeatherForecast || !daily?.time?.length) {
+    wrap.innerHTML = '';
+    return;
+  }
+  const unitLabel = unit === 'fahrenheit' ? '°F' : '°C';
+  const days = normalizeForecastDays(state.settings.weatherForecastDays);
+  wrap.innerHTML = '';
+  daily.time.slice(0, days).forEach((dateText, idx) => {
+    const card = document.createElement('div');
+    card.className = 'forecast-day';
+
+    const label = document.createElement('div');
+    label.className = 'forecast-label';
+    label.textContent = idx === 0 ? 'Today' : new Date(dateText + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+
+    const icon = document.createElement('div');
+    icon.className = `forecast-icon ${wmoIcon(Number(daily.weather_code?.[idx] ?? 0))}`.trim();
+    const precip = document.createElement('span');
+    precip.className = 'forecast-precip';
+    icon.appendChild(precip);
+
+    const high = document.createElement('div');
+    high.className = 'forecast-temp';
+    high.textContent = formatForecastTemp(daily.temperature_2m_max?.[idx], unitLabel);
+
+    const low = document.createElement('div');
+    low.className = 'forecast-low';
+    low.textContent = formatForecastTemp(daily.temperature_2m_min?.[idx], unitLabel);
+
+    card.append(label, icon, high, low);
+    wrap.appendChild(card);
+  });
+}
+function formatForecastTemp(value, unitLabel) {
+  const temp = Math.round(Number(value));
+  return Number.isFinite(temp) ? `${temp}${unitLabel}` : '—';
+}
+function wmoDesc(c) {
+  if (c===0) return 'CLEAR SKY';
+  if (c<=2) return 'PARTLY CLOUDY';
+  if (c===3) return 'OVERCAST';
+  if (c<=49) return 'FOG';
+  if (c<=59) return 'DRIZZLE';
+  if (c<=69) return 'RAIN';
+  if (c<=79) return 'SNOW';
+  if (c<=84) return 'SHOWERS';
+  return 'THUNDERSTORM';
+}
+function wmoIcon(c) {
+  if (c===0) return '';
+  if (c<=2) return 'partly';
+  if (c<=49) return 'cloudy';
+  if (c<=69) return 'rainy';
+  if (c<=79) return 'snowy';
+  return 'thunder';
+}
+
+// ─── Views / Tabs ────────────────────────────────────────────
+function buildTabs() {
+  const list = document.getElementById('tabs-list');
+  list.innerHTML = '';
+  const pill = document.createElement('div');
+  pill.id = 'tabs-active-pill';
+  list.appendChild(pill);
+  state.groups.forEach(g => {
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (g.id === state.activeGroup ? ' active' : '') + (g.isHome ? ' home-tab' : '');
+    btn.textContent = g.name;
+    btn.dataset.id = g.id;
+    btn.addEventListener('click', () => switchView(g.id));
+    if (!g.isHome) {
+      btn.addEventListener('dblclick', () => openTabModal(g.id));
+      btn.addEventListener('contextmenu', e => { e.preventDefault(); openTabModal(g.id); });
+
+      // Tab drag & drop (reorder)
+      btn.draggable = true;
+      btn.addEventListener('dragstart', e => {
+        draggingTabId = g.id;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', g.id);
+        e.dataTransfer.setData(TAB_DRAG_MIME, g.id);
+      });
+      btn.addEventListener('dragend', () => {
+        draggingTabId = null;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('drag-over'));
+      });
+      btn.addEventListener('dragover', e => {
+        const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
+        const draggedTabId = e.dataTransfer?.getData(TAB_DRAG_MIME) || draggingTabId;
+        if ((!draggedTabId && !draggedDialId) || draggedTabId === g.id) return;
+        e.preventDefault();
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('drag-over'));
+        btn.classList.add('drag-over');
+      });
+      btn.addEventListener('drop', e => {
+        e.preventDefault();
+        btn.classList.remove('drag-over');
+        const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
+        const draggedTabId = e.dataTransfer?.getData(TAB_DRAG_MIME) || draggingTabId;
+
+        if (draggedDialId) {
+          // Drop dial onto tab
+          moveDial(draggedDialId, g.id);
+          draggingDialId = null;
+          return;
+        }
+
+        if (!draggedTabId || draggedTabId === g.id) return;
+        // Reorder tabs
+        const fromIdx = state.groups.findIndex(gr => gr.id === draggedTabId);
+        const toIdx   = state.groups.findIndex(gr => gr.id === g.id);
+        if (fromIdx === -1 || toIdx === -1) return;
+        const [moved] = state.groups.splice(fromIdx, 1);
+        state.groups.splice(toIdx, 0, moved);
+        draggingTabId = null;
+        saveState();
+        buildTabs();
+      });
+    }
+
+    // Also allow dropping dials onto home tab? No — only non-home groups
+    if (g.isHome) {
+      btn.addEventListener('dragover', e => {
+        const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
+        if (draggedDialId) e.preventDefault();
+      });
+      btn.addEventListener('drop', e => {
+        const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
+        if (!draggedDialId) return;
+        e.preventDefault();
+        draggingDialId = null;
+      });
+    }
+
+    list.appendChild(btn);
+  });
+  requestAnimationFrame(updateTabsActivePill);
+}
+
+function syncActiveTabButton() {
+  document.querySelectorAll('#tabs-list .tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.id === state.activeGroup);
+  });
+}
+
+function updateTabsActivePill() {
+  const list = document.getElementById('tabs-list');
+  const scroll = document.getElementById('tabs-scroll');
+  const pill = document.getElementById('tabs-active-pill');
+  const activeBtn = list?.querySelector('.tab-btn.active');
+  if (!list || !scroll || !pill || !activeBtn) {
+    if (pill) pill.style.opacity = '0';
+    return;
+  }
+
+  const left = activeBtn.offsetLeft;
+  const width = activeBtn.offsetWidth;
+  pill.style.opacity = '1';
+  pill.style.width = `${width}px`;
+  pill.style.transform = `translate3d(${left}px, 0, 0)`;
+}
+
+function switchView(groupId) {
+  if (state.activeGroup === groupId) return;
+  state.activeGroup = groupId;
+  saveState({ scheduleBackup: false });
+  syncActiveTabButton();
+  showView(groupId);
+  requestAnimationFrame(updateTabsActivePill);
+}
+
+function showView(groupId) {
+  const group = state.groups.find(g => g.id === groupId);
+  const nextView = document.getElementById(group?.isHome ? 'view-home' : 'view-dials');
+  const prevView = document.querySelector('.view.active');
+  clearTimeout(viewTransitionTimer);
+  if (prevView && prevView !== nextView) {
+    prevView.classList.remove('active');
+    prevView.classList.add('view-leaving');
+    viewTransitionTimer = setTimeout(() => prevView.classList.remove('view-leaving'), 520);
+  }
+  nextView.classList.remove('view-leaving');
+  nextView.classList.add('active');
+  if (!group?.isHome) renderDials();
+}
+
+function activeGroup() {
+  return state.groups.find(g => g.id === state.activeGroup) || state.groups[0];
+}
+
+// ─── Dials ──────────────────────────────────────────────────
+function renderDials() {
+  const grid = document.getElementById('dials-grid');
+  grid.innerHTML = '';
+  const g = activeGroup();
+  if (!g || g.isHome) return;
+  const s = state.settings;
+
+  g.dials.forEach((dial, i) => {
+    const card = document.createElement('div');
+    card.className = 'dial-card' +
+      (s.showBorder ? '' : ' no-border') +
+      (s.glass ? '' : ' no-glass') +
+      (s.hoverZoom ? '' : ' no-zoom');
+    const iconScale = Number.isFinite(Number(dial.iconScale))
+      ? Number(dial.iconScale)
+      : getIconScale(s.dialIconScale);
+    card.style.setProperty('--dial-icon-scale-local', `${iconScale / 100}`);
+    card.dataset.id = dial.id;
+    card.style.animationDelay = `${i * 0.03}s`;
+
+    // Drag & drop for dials
+    card.draggable = true;
+    card.addEventListener('dragstart', e => {
+      draggingDialId = dial.id;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dial.id);
+      e.dataTransfer.setData(DIAL_DRAG_MIME, dial.id);
+    });
+    card.addEventListener('dragend', () => {
+      draggingDialId = null;
+      card.classList.remove('dragging');
+      document.querySelectorAll('.dial-card').forEach(c => {
+        c.classList.remove('drag-over-left', 'drag-over-right');
+      });
+    });
+    card.addEventListener('dragover', e => {
+      const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
+      if (!draggedDialId || draggedDialId === dial.id) return;
+      e.preventDefault();
+      document.querySelectorAll('.dial-card').forEach(c => {
+        c.classList.remove('drag-over-left', 'drag-over-right');
+      });
+      const rect = card.getBoundingClientRect();
+      const isLeft = e.clientX < rect.left + rect.width / 2;
+      card.classList.add(isLeft ? 'drag-over-left' : 'drag-over-right');
+    });
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      document.querySelectorAll('.dial-card').forEach(c => {
+        c.classList.remove('drag-over-left', 'drag-over-right');
+      });
+      const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
+      if (!draggedDialId || draggedDialId === dial.id) return;
+
+      const fromGroup = state.groups.find(gr => gr.dials.some(d => d.id === draggedDialId));
+      if (!fromGroup) return;
+      const toGroup = g;
+
+      const fromIdx = fromGroup.dials.findIndex(d => d.id === draggedDialId);
+      const [movedDial] = fromGroup.dials.splice(fromIdx, 1);
+
+      const toIdx = toGroup.dials.findIndex(d => d.id === dial.id);
+      const rect = card.getBoundingClientRect();
+      const insertAfter = e.clientX >= rect.left + rect.width / 2;
+      toGroup.dials.splice(insertAfter ? toIdx + 1 : toIdx, 0, movedDial);
+
+      draggingDialId = null;
+      saveState();
+      renderDials();
+    });
+
+    // ── Thumbnail area ──
+    const thumb = document.createElement('div');
+    thumb.className = 'dial-thumb';
+
+    if (dial.customIcon) {
+      const img = document.createElement('img');
+      img.className = 'dial-thumb-img dial-thumb-custom-icon';
+      img.src = dial.customIcon;
+      img.alt = '';
+      img.onerror = () => {
+        const ph = document.createElement('div');
+        ph.className = 'dial-thumb-placeholder';
+        const l = document.createElement('div');
+        l.className = 'dial-letter';
+        l.textContent = (dial.name || 'S')[0].toUpperCase();
+        ph.appendChild(l);
+        thumb.innerHTML = '';
+        thumb.appendChild(ph);
+      };
+      thumb.appendChild(img);
+    } else {
+      const ph = document.createElement('div');
+      ph.className = 'dial-thumb-placeholder';
+      if (s.showFavicon) {
+        const dialFavicon = getDialFavicon(dial);
+        if (dialFavicon) {
+          const ico = document.createElement('img');
+          ico.className = 'dial-favicon';
+          ico.src = dialFavicon;
+          ico.alt = '';
+          ico.onerror = () => {
+            const l = document.createElement('div');
+            l.className = 'dial-letter';
+            l.textContent = (dial.name || 'S')[0].toUpperCase();
+            ico.replaceWith(l);
+          };
+          ph.appendChild(ico);
+        } else {
+          const l = document.createElement('div');
+          l.className = 'dial-letter';
+          l.textContent = (dial.name || 'S')[0].toUpperCase();
+          ph.appendChild(l);
+        }
+      }
+      thumb.appendChild(ph);
+    }
+
+    // ── Footer bar ──
+    if (s.showFooter) {
+      const footer = document.createElement('div');
+      footer.className = 'dial-footer' + (s.showLabel ? '' : ' no-label');
+
+      const dialFavicon = getDialFavicon(dial);
+      if (s.showFavicon && dialFavicon && !dial.customIcon) {
+        const fi = document.createElement('img');
+        fi.className = 'dial-footer-icon';
+        fi.src = dialFavicon;
+        fi.alt = '';
+        fi.onerror = () => {
+          const fl = document.createElement('div');
+          fl.className = 'dial-footer-icon-letter';
+          fl.textContent = (dial.name || 'S')[0].toUpperCase();
+          fi.replaceWith(fl);
+        };
+        footer.appendChild(fi);
+      } else if (s.showFavicon && !dialFavicon && !dial.customIcon) {
+        const fl = document.createElement('div');
+        fl.className = 'dial-footer-icon-letter';
+        fl.textContent = (dial.name || 'S')[0].toUpperCase();
+        footer.appendChild(fl);
+      }
+
+      if (s.showLabel) {
+        const label = document.createElement('div');
+        label.className = 'dial-label';
+        label.textContent = dial.name || cleanHost(dial.url);
+        footer.appendChild(label);
+      }
+
+      card.append(thumb, footer);
+    } else {
+      card.appendChild(thumb);
+    }
+
+    // ── Context button ──
+    const ctx = document.createElement('button');
+    ctx.className = 'dial-ctx';
+    ctx.textContent = '⋯';
+    ctx.addEventListener('click', e => { e.stopPropagation(); showCtxMenu(e, dial.id); });
+    card.appendChild(ctx);
+
+    card.addEventListener('click', () => {
+      if (checkFocusBlock(g.id)) {
+        window._lastBlockedUrl = dial.url;
+        showBlockedToast(focusSession?.hardBlock);
+        return;
+      }
+      window.location.href = dial.url;
+    });
+    card.addEventListener('auxclick', e => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      if (checkFocusBlock(g.id)) {
+        window._lastBlockedUrl = dial.url;
+        showBlockedToast(focusSession?.hardBlock);
+        return;
+      }
+      chrome.tabs.create({ url: dial.url, active: false });
+    });
+    card.addEventListener('mousedown', e => {
+      if (e.button === 1) e.preventDefault();
+    });
+    card.addEventListener('contextmenu', e => { e.preventDefault(); showCtxMenu(e, dial.id); });
+    grid.appendChild(card);
+  });
+
+  // ── Add button ──
+  const add = document.createElement('div');
+  add.className = 'dial-card dial-add';
+  add.style.display = s.showAddDialButton ? '' : 'none';
+  add.style.animationDelay = `${g.dials.length * 0.03}s`;
+  const addInner = document.createElement('div');
+  addInner.className = 'dial-add-inner';
+  addInner.innerHTML = '<div class="dial-add-icon">+</div><div class="dial-add-text">Add Dial</div>';
+  add.appendChild(addInner);
+  add.addEventListener('click', () => openDialModal(null));
+  // Allow drops on the add button too (append at end)
+  add.addEventListener('dragover', e => {
+    const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
+    if (draggedDialId) e.preventDefault();
+  });
+  add.addEventListener('drop', e => {
+    e.preventDefault();
+    const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
+    if (!draggedDialId) return;
+    const fromGroup = state.groups.find(gr => gr.dials.some(d => d.id === draggedDialId));
+    if (!fromGroup) return;
+    const fromIdx = fromGroup.dials.findIndex(d => d.id === draggedDialId);
+    const [movedDial] = fromGroup.dials.splice(fromIdx, 1);
+    g.dials.push(movedDial);
+    draggingDialId = null;
+    saveState();
+    renderDials();
+  });
+  grid.appendChild(add);
+}
+
+function cleanHost(url) {
+  try { return new URL(url).hostname.replace('www.',''); } catch { return url || ''; }
+}
+
+function faviconUrl(url) {
+  try { return `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}&sz=64`; } catch { return null; }
+}
+
+function favIconUrl(url) {
+  return faviconUrl(url);
+}
+
+function getDialFavicon(dial) {
+  return dial?.favIconUrl || dial?.favicon || null;
+}
+
+function findDial(id) {
+  for (const g of state.groups) { const d = g.dials.find(d => d.id===id); if (d) return d; }
+}
+
+// ─── Dial Modal ──────────────────────────────────────────────
+function openDialModal(dialId) {
+  editingDialId = dialId;
+  selectedIconUrl = null;
+  const d = dialId ? findDial(dialId) : null;
+  const fallbackScale = getIconScale(state.settings.dialIconScale);
+  const currentScale = Number.isFinite(Number(d?.iconScale)) ? Number(d.iconScale) : fallbackScale;
+  const hasCustomIcon = !!d?.customIcon;
+  document.getElementById('modal-dial-title').textContent = dialId ? 'Edit Dial' : 'Add Dial';
+  document.getElementById('dial-name-inp').value = d?.name || '';
+  document.getElementById('dial-url-inp').value = d?.url || '';
+  document.getElementById('dial-icon-scale-inp').value = String(currentScale);
+  document.querySelector(`input[name="icon-src"][value="${hasCustomIcon ? 'upload' : 'auto'}"]`).checked = true;
+  document.getElementById('icon-search-area').style.display = 'none';
+  document.getElementById('icon-upload-area').style.display = hasCustomIcon ? 'block' : 'none';
+  document.getElementById('icon-results').innerHTML = '';
+  document.getElementById('icon-selected-preview').style.display = 'none';
+  const preview = document.getElementById('dial-icon-preview');
+  preview.src = d?.customIcon || '';
+  preview.style.display = hasCustomIcon ? 'block' : 'none';
+  document.getElementById('dial-icon-file').value = '';
+  openOverlay('modal-dial');
+  document.getElementById('dial-name-inp').focus();
+}
+
+function closeDialModal() {
+  closeOverlay('modal-dial');
+  editingDialId = null;
+  selectedIconUrl = null;
+}
+
+async function saveDialModal() {
+  const name = document.getElementById('dial-name-inp').value.trim();
+  let url = document.getElementById('dial-url-inp').value.trim();
+  const iconScale = getIconScale(parseInt(document.getElementById('dial-icon-scale-inp').value, 10));
+  if (!url) return;
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+
+  const iconSrc = document.querySelector('input[name="icon-src"]:checked').value;
+  const existingDial = editingDialId ? findDial(editingDialId) : null;
+  let customIcon = existingDial?.customIcon || null;
+  let favicon = existingDial?.favIconUrl || existingDial?.favicon || null;
+
+  if (iconSrc === 'upload') {
+    const prev = document.getElementById('dial-icon-preview');
+    if (prev.src && prev.src !== window.location.href && prev.style.display !== 'none') {
+      customIcon = prev.src;
+      favicon = null;
+    }
+  } else if (iconSrc === 'search' && selectedIconUrl) {
+    customIcon = selectedIconUrl;
+    favicon = null;
+  } else {
+    customIcon = null;
+    favicon = faviconUrl(url);
+  }
+
+  const g = activeGroup();
+  if (editingDialId) {
+    const d = findDial(editingDialId);
+    if (d) {
+      d.name = name || cleanHost(url);
+      d.url = url;
+      d.favicon = favicon;
+      d.favIconUrl = favicon;
+      d.customIcon = customIcon;
+      d.iconScale = iconScale;
+    }
+  } else {
+    g.dials.push({ id: uid(), name: name || cleanHost(url), url, favicon, favIconUrl: favicon, customIcon, iconScale });
+  }
+  saveState(); renderDials(); closeDialModal();
+}
+
+// ─── Context menu ────────────────────────────────────────────
+function showCtxMenu(e, dialId) {
+  ctxDialId = dialId;
+  const m = document.getElementById('ctx-menu');
+  clearTimeout(ctxHideTimer);
+  m.style.display = 'block';
+  positionEl(m, e.clientX, e.clientY);
+  requestAnimationFrame(() => m.classList.add('is-open'));
+  document.getElementById('ctx-move-sub').style.display = 'none';
+  document.getElementById('ctx-move-sub').classList.remove('is-open');
+}
+
+function positionEl(el, x, y) {
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  requestAnimationFrame(() => {
+    const r = el.getBoundingClientRect();
+    if (r.right > window.innerWidth) el.style.left = (x - r.width) + 'px';
+    if (r.bottom > window.innerHeight) el.style.top = (y - r.height) + 'px';
+  });
+}
+
+function hideCtx() {
+  const menu = document.getElementById('ctx-menu');
+  const sub = document.getElementById('ctx-move-sub');
+  menu.classList.remove('is-open');
+  sub.classList.remove('is-open');
+  clearTimeout(ctxHideTimer);
+  ctxHideTimer = setTimeout(() => {
+    menu.style.display = 'none';
+    sub.style.display = 'none';
+  }, 180);
+  ctxDialId = null;
+}
+
+function moveDial(dialId, toGroupId) {
+  let dial = null;
+  for (const g of state.groups) {
+    const i = g.dials.findIndex(d => d.id === dialId);
+    if (i !== -1) { dial = g.dials.splice(i, 1)[0]; break; }
+  }
+  if (dial) {
+    const tg = state.groups.find(g => g.id === toGroupId);
+    if (tg) tg.dials.push(dial);
+  }
+  saveState(); renderDials();
+}
+
+function normalizeDial(input) {
+  if (!input) return null;
+  const rawUrl = String(input.url || input.link || input.display_url || input.site || '').trim();
+  if (!rawUrl) return null;
+  const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+  const icon = input.favIconUrl || input.favicon || input.iconUrl || input.icon || favIconUrl(url);
+  const iconScaleRaw = parseInt(input.iconScale, 10);
+  const iconScale = Number.isFinite(iconScaleRaw) ? iconScaleRaw : 100;
+  return {
+    id: uid(),
+    name: String(input.name || input.title || input.label || cleanHost(url)).trim() || cleanHost(url),
+    url,
+    favicon: icon,
+    favIconUrl: icon,
+    customIcon: input.customIcon || null,
+    iconScale
+  };
+}
+
+function findArrayDeep(obj, predicate, seen = new WeakSet()) {
+  if (!obj || typeof obj !== 'object') return null;
+  if (seen.has(obj)) return null;
+  seen.add(obj);
+  if (Array.isArray(obj)) {
+    if (predicate(obj)) return obj;
+    for (const item of obj) {
+      const found = findArrayDeep(item, predicate, seen);
+      if (found) return found;
+    }
+    return null;
+  }
+  for (const value of Object.values(obj)) {
+    const found = findArrayDeep(value, predicate, seen);
+    if (found) return found;
+  }
+  return null;
+}
+
+function importNativeBackup(imported) {
+  if (!imported.groups) throw new Error('Invalid backup');
+  state.groups = normalizeGroupsWithHome(imported.groups);
+  state.activeGroup = imported.activeGroup || state.groups[0]?.id;
+  state.settings = { ...DEFAULT_STATE().settings, ...(imported.settings || {}) };
+  state.player = { ...DEFAULT_STATE().player, ...(imported.player || {}) };
+  state.notes = imported.notes || '';
+  if (!state.groups.some(g => g.id === state.activeGroup)) state.activeGroup = 'home';
+}
+
+function importFvdBackup(imported) {
+  const groupsRaw = findArrayDeep(imported, arr => arr.some(item =>
+    item && typeof item === 'object' && !Array.isArray(item) &&
+    (item.name || item.title) &&
+    (Object.hasOwn(item, 'id') || Object.hasOwn(item, 'group_id') || Object.hasOwn(item, 'global_id'))
+  ));
+  const dialsRaw = findArrayDeep(imported, arr => arr.some(item =>
+    item && typeof item === 'object' && !Array.isArray(item) &&
+    (item.url || item.link || item.display_url || item.site)
+  ));
+  if (!groupsRaw || !dialsRaw) throw new Error('FVD structure not recognized');
+
+  const groups = groupsRaw.map((group, index) => ({
+    id: String(group.id ?? group.group_id ?? group.global_id ?? `fvd-group-${index}`),
+    name: String(group.name || group.title || `Group ${index + 1}`),
+    dials: []
+  }));
+  const groupMap = new Map(groups.map(group => [group.id, group]));
+
+  dialsRaw.forEach(dial => {
+    const normalized = normalizeDial(dial);
+    if (!normalized) return;
+    const groupId = String(dial.group_id ?? dial.groupId ?? dial.groupid ?? dial.parent_id ?? dial.category_id ?? groups[0]?.id);
+    const group = groupMap.get(groupId) || groups[0];
+    if (group) group.dials.push(normalized);
+  });
+
+  state.groups = normalizeGroupsWithHome([{ id: 'home', name: 'HOME', isHome: true, dials: [] }, ...groups]);
+  state.activeGroup = groups[0]?.id || 'home';
+  state.settings = { ...DEFAULT_STATE().settings, ...state.settings };
+}
+
+function importData(imported, sourceHint = 'auto') {
+  const looksNative = Array.isArray(imported?.groups) && imported.groups.some(group => Array.isArray(group?.dials));
+  if (sourceHint === 'fvd' || !looksNative) {
+    try {
+      importFvdBackup(imported);
+      return 'FVD Speed Dial';
+    } catch (error) {
+      if (sourceHint === 'fvd') throw error;
+    }
+  }
+  importNativeBackup(imported);
+  return 'backup';
+}
+
+// ─── Tab Modal ───────────────────────────────────────────────
+function openTabModal(groupId, triggerEl) {
+  editingTabId = groupId;
+  const g = state.groups.find(g => g.id === groupId);
+  document.getElementById('modal-tab-title').textContent = groupId ? 'Rename Group' : 'New Group';
+  document.getElementById('tab-name-inp').value = g?.name || '';
+  document.getElementById('tab-delete-btn').style.display = (groupId && state.groups.filter(g => !g.isHome).length > 1) ? 'inline-flex' : 'none';
+  openOverlay('modal-tab', triggerEl);
+  document.getElementById('tab-name-inp').focus();
+}
+function closeTabModal() { closeOverlay('modal-tab'); editingTabId = null; }
+function saveTabModal() {
+  const name = document.getElementById('tab-name-inp').value.trim() || 'Group';
+  if (editingTabId) {
+    const g = state.groups.find(g => g.id === editingTabId);
+    if (g) g.name = name;
+  } else {
+    const ng = { id: uid(), name, dials: [] };
+    state.groups.push(ng);
+    state.activeGroup = ng.id;
+  }
+  saveState(); buildTabs(); showView(state.activeGroup); closeTabModal();
+}
+function deleteTab() {
+  if (!editingTabId || state.groups.filter(g => !g.isHome).length <= 1) return;
+  state.groups = state.groups.filter(g => g.id !== editingTabId);
+  if (state.activeGroup === editingTabId) state.activeGroup = state.groups.find(g => !g.isHome)?.id || state.groups[0].id;
+  saveState(); buildTabs(); showView(state.activeGroup); closeTabModal();
+}
+
+// ─── Settings Modal ──────────────────────────────────────────
+function openSettings(triggerEl) {
+  const s = state.settings;
+  document.querySelector(`input[name="bg-type"][value="${s.bgType}"]`).checked = true;
+  document.getElementById('bg-color-inp').value = s.bgColor;
+  document.getElementById('s-bg-color').style.display = s.bgType === 'solid' ? 'block' : 'none';
+  document.getElementById('s-bg-image').style.display = s.bgType === 'image' ? 'block' : 'none';
+  if (s.bgImage) { const p = document.getElementById('bg-img-preview'); p.src = s.bgImage; p.style.display = 'block'; }
+  document.getElementById('overlay-opacity').value = s.overlayOp;
+  document.getElementById('overlay-val').textContent = s.overlayOp;
+  document.getElementById('s-cols').value = s.cols;
+  document.getElementById('s-shape').value = s.dialShape;
+  document.getElementById('s-show-label').checked = s.showLabel;
+  document.getElementById('s-show-favicon').checked = s.showFavicon;
+  document.getElementById('s-show-footer').checked = s.showFooter;
+  document.getElementById('s-hover-zoom').checked = s.hoverZoom;
+  document.getElementById('s-glass').checked = s.glass;
+  document.getElementById('s-border').checked = s.showBorder;
+  document.getElementById('s-show-add-dial').checked = s.showAddDialButton;
+  document.getElementById('s-dial-icon-scale').value = String(s.dialIconScale ?? 100);
+  document.getElementById('s-show-clock').checked = s.showClock;
+  document.getElementById('s-24h').checked = s.use24h;
+  document.getElementById('s-seconds').checked = s.showSeconds;
+  document.getElementById('s-show-weather').checked = s.showWeather;
+  document.getElementById('s-show-weather-forecast').checked = s.showWeatherForecast;
+  document.getElementById('s-weather-forecast-days').value = String(normalizeForecastDays(s.weatherForecastDays));
+  document.getElementById('s-show-player').checked = s.showPlayer;
+  document.getElementById('s-show-notes').checked = s.showNotes;
+  document.getElementById('s-weather-city').value = s.weatherCity;
+  document.getElementById('s-temp-unit').value = s.tempUnit;
+  document.getElementById('s-music-leave').value = s.musicLeave;
+  document.getElementById('s-autoplay').checked = s.autoplay;
+  document.getElementById('s-loop').checked = s.loopPlaylist;
+  document.getElementById('s-shuffle-start').checked = s.shuffleOnStart;
+  document.getElementById('s-blocked-domains').value = s.blockedDomains || '';
+  openOverlay('modal-settings', triggerEl);
+}
+function closeSettings() { closeOverlay('modal-settings'); }
+
+async function saveSettings() {
+  const s = state.settings;
+  s.bgType = document.querySelector('input[name="bg-type"]:checked').value;
+  s.bgColor = document.getElementById('bg-color-inp').value;
+  s.overlayOp = parseFloat(document.getElementById('overlay-opacity').value);
+  s.cols = parseInt(document.getElementById('s-cols').value);
+  s.dialShape = document.getElementById('s-shape').value;
+  s.showLabel = document.getElementById('s-show-label').checked;
+  s.showFavicon = document.getElementById('s-show-favicon').checked;
+  s.showFooter = document.getElementById('s-show-footer').checked;
+  s.hoverZoom = document.getElementById('s-hover-zoom').checked;
+  s.glass = document.getElementById('s-glass').checked;
+  s.showBorder = document.getElementById('s-border').checked;
+  s.showAddDialButton = document.getElementById('s-show-add-dial').checked;
+  s.dialIconScale = getIconScale(parseInt(document.getElementById('s-dial-icon-scale').value, 10));
+  s.showClock = document.getElementById('s-show-clock').checked;
+  s.use24h = document.getElementById('s-24h').checked;
+  s.showSeconds = document.getElementById('s-seconds').checked;
+  s.showWeather = document.getElementById('s-show-weather').checked;
+  s.showWeatherForecast = document.getElementById('s-show-weather-forecast').checked;
+  s.weatherForecastDays = normalizeForecastDays(document.getElementById('s-weather-forecast-days').value);
+  s.showPlayer = document.getElementById('s-show-player').checked;
+  s.showNotes = document.getElementById('s-show-notes').checked;
+  s.weatherCity = document.getElementById('s-weather-city').value.trim() || 'Dublin';
+  s.tempUnit = document.getElementById('s-temp-unit').value;
+  s.musicLeave = document.getElementById('s-music-leave').value;
+  s.autoplay = document.getElementById('s-autoplay').checked;
+  s.loopPlaylist = document.getElementById('s-loop').checked;
+  s.shuffleOnStart = document.getElementById('s-shuffle-start').checked;
+  s.blockedDomains = document.getElementById('s-blocked-domains').value;
+
+  // BG image — with canvas optimization for large files
+  const bgFile = document.getElementById('bg-img-file').files[0];
+  if (bgFile) {
+    const raw = await fileToB64(bgFile);
+    s.bgImage = await optimizeImage(raw, 1920);
+  }
+  if (s.bgType !== 'image') s.bgImage = null;
+
+  saveState();
+  applySettings();
+  renderDials();
+  fetchWeather();
+  if (s.bgType === 'stars') drawStars();
+  closeSettings();
+}
+
+// ─── Image optimization ──────────────────────────────────────
+function optimizeImage(dataUrl, maxW) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      if (img.width <= maxW) { resolve(dataUrl); return; }
+      const scale = maxW / img.width;
+      const canvas = document.createElement('canvas');
+      canvas.width = maxW;
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // Use webp if available for smaller size, fallback to jpeg
+      const out = canvas.toDataURL('image/webp', 0.85) || canvas.toDataURL('image/jpeg', 0.85);
+      resolve(out);
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+// ─── Import / Export ─────────────────────────────────────────
+function openIE(triggerEl) { openOverlay('modal-ie', triggerEl); }
+function closeIE() { closeOverlay('modal-ie'); }
+
+function doExportFull() {
+  const data = buildExportableState(state);
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `dialspace-full-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+}
+
+function doExportMinimal() {
+  const data = {
+    format: 'dialspace-minimal-backup-v1',
+    exportedAt: new Date().toISOString(),
+    data: cloudSerialize()
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `dialspace-minimal-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+}
+
+function doImport(file) {
+  const r = new FileReader();
+  r.onload = e => {
+    try {
+      const imported = JSON.parse(e.target.result);
+      const data = normalizeImportedCloudPayload(imported) || imported;
+      const source = importData(data);
+      saveState(); applySettings(true); buildTabs(); showView(state.activeGroup);
+      closeIE(); alert(`Imported ${source} successfully!`);
+    } catch(err) { alert('Invalid backup file: ' + err.message); }
+  };
+  r.readAsText(file);
+}
+
+function doImportFvd(file) {
+  const r = new FileReader();
+  r.onload = e => {
+    try {
+      importFvdText(e.target.result);
+    } catch(err) { alert('FVD import failed: ' + err.message); }
+  };
+  r.readAsText(file);
+}
+
+function importFvdText(rawText) {
+  const text = String(rawText || '').trim();
+  if (!text) throw new Error('Empty FVD text');
+  const imported = JSON.parse(text);
+  importData(imported, 'fvd');
+  saveState();
+  applySettings(true);
+  buildTabs();
+  showView(state.activeGroup);
+  const textArea = document.getElementById('ie-import-fvd-text');
+  if (textArea) textArea.value = '';
+  closeIE();
+  alert('Imported FVD Speed Dial successfully!');
+}
+
+function doReset() {
+  if (!confirm('Reset ALL data? This cannot be undone.')) return;
+  chrome.storage.local.remove('ds2', () => {
+    state = DEFAULT_STATE();
+    applySettings(true); buildTabs(); showView(state.activeGroup);
+    closeIE();
+  });
+}
+
+// ─── Cloud Sync ───────────────────────────────────────────────
+function cloudSerialize() {
+  const s = JSON.parse(JSON.stringify(state));
+  s.settings.bgImage = null;
+  s.player.playlist = s.player.playlist.filter(t => t.type === 'url');
+  s.groups = s.groups.map(group => ({
+    id: group.id,
+    name: group.name,
+    isHome: !!group.isHome,
+    dials: (group.dials || []).map(dial => ({
+      id: dial.id,
+      name: dial.name,
+      url: dial.url,
+      customIcon: dial.customIcon && dial.customIcon.length <= 1500 ? dial.customIcon : null
+    }))
+  }));
+  s.player = {
+    playlist: s.player.playlist.map(track => ({
+      name: track.name,
+      artist: track.artist || '',
+      type: 'url',
+      src: track.src
+    })),
+    currentIdx: s.player.currentIdx || 0,
+    shuffle: !!s.player.shuffle,
+    repeat: !!s.player.repeat,
+    volume: s.player.volume ?? 1,
+    position: 0
+  };
+  if (s.notes && s.notes.length > 2000) s.notes = s.notes.slice(0, 2000);
+  return s;
+}
+
+function chunkStringByBytes(str, maxBytes) {
+  const chunks = [];
+  let current = '';
+  for (const ch of str) {
+    const next = current + ch;
+    if (new Blob([next]).size > maxBytes) {
+      if (!current) throw new Error('Cloud item too large');
+      chunks.push(current);
+      current = ch;
+    } else {
+      current = next;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function getCloudKeysToRemove(items) {
+  return Object.keys(items).filter(key =>
+    key === 'ds2cloud' ||
+    key === 'ds2cloud_chunks' ||
+    key.startsWith('ds2cloud_')
+  );
+}
+
+function readCloudBackupString(items) {
+  if (!items || typeof items !== 'object') return '';
+
+  if (typeof items.ds2cloud === 'string' && items.ds2cloud) {
+    return items.ds2cloud;
+  }
+
+  const chunkKeys = Object.keys(items)
+    .filter(key => /^ds2cloud_\d+$/.test(key))
+    .sort((a, b) => parseInt(a.split('_').pop(), 10) - parseInt(b.split('_').pop(), 10));
+
+  if (chunkKeys.length) {
+    return chunkKeys.map(key => items[key] || '').join('');
+  }
+
+  if (items.ds2cloud_chunks && Number(items.ds2cloud_chunks) > 0) {
+    let str = '';
+    for (let i = 0; i < Number(items.ds2cloud_chunks); i++) {
+      str += items[`ds2cloud_${i}`] || '';
+    }
+    return str;
+  }
+
+  return '';
+}
+
+function readChunkedCloudByPrefix(items, prefix) {
+  if (!items || !prefix) return '';
+  if (typeof items[prefix] === 'string' && items[prefix]) return items[prefix];
+
+  const numberedKeys = Object.keys(items)
+    .filter(key => new RegExp(`^${prefix}_\\d+$`).test(key))
+    .sort((a, b) => parseInt(a.split('_').pop(), 10) - parseInt(b.split('_').pop(), 10));
+
+  if (numberedKeys.length) {
+    return numberedKeys.map(key => items[key] || '').join('');
+  }
+
+  if (items[`${prefix}_chunks`] && Number(items[`${prefix}_chunks`]) > 0) {
+    let str = '';
+    for (let i = 0; i < Number(items[`${prefix}_chunks`]); i++) {
+      str += items[`${prefix}_${i}`] || '';
+    }
+    return str;
+  }
+
+  return '';
+}
+
+function parseMaybeJson(value) {
+  if (value == null) return null;
+  if (typeof value === 'object') return value;
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function normalizeImportedCloudPayload(value) {
+  let current = value;
+  for (let i = 0; i < 6; i++) {
+    const parsed = parseMaybeJson(current);
+    if (parsed == null) return null;
+    current = parsed;
+    if (typeof current === 'string') continue;
+    if (current?.format === 'dialspace-minimal-backup-v1' && current?.data) {
+      current = current.data;
+      continue;
+    }
+    if (current?.backup) {
+      current = current.backup;
+      continue;
+    }
+    if (current?.payload) {
+      current = current.payload;
+      continue;
+    }
+    if (current?.data && typeof current.data === 'object' && !Array.isArray(current.data)) {
+      current = current.data;
+      continue;
+    }
+    return current;
+  }
+  return typeof current === 'object' ? current : null;
+}
+
+function collectCloudLoadCandidates(items) {
+  const candidates = [];
+  const pushIfPresent = value => {
+    if (value == null) return;
+    if (typeof value === 'string' && !value.trim()) return;
+    candidates.push(value);
+  };
+
+  pushIfPresent(readCloudBackupString(items));
+
+  const legacyKeys = ['speeddial2', 'speeddial', 'sd2', 'dialspace', 'ds2'];
+  legacyKeys.forEach(key => pushIfPresent(items[key]));
+
+  const cloudPrefixes = ['ds2cloud', 'dialspacecloud', 'speeddialcloud', 'sd2cloud', 'dscloud'];
+  cloudPrefixes.forEach(prefix => pushIfPresent(readChunkedCloudByPrefix(items, prefix)));
+
+  Object.entries(items || {}).forEach(([key, value]) => {
+    if (!/(cloud|backup|speeddial|dialspace|ds2|sd2)/i.test(key)) return;
+    pushIfPresent(value);
+  });
+
+  const seen = new Set();
+  return candidates.filter(candidate => {
+    const fingerprint = typeof candidate === 'string' ? candidate.trim() : JSON.stringify(candidate);
+    if (!fingerprint || seen.has(fingerprint)) return false;
+    seen.add(fingerprint);
+    return true;
+  });
+}
+
+function deepCollectBackups(value, out, visited = new WeakSet(), depth = 0) {
+  if (value == null || depth > 7) return;
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    out.push(trimmed);
+    try {
+      const parsed = JSON.parse(trimmed);
+      deepCollectBackups(parsed, out, visited, depth + 1);
+    } catch {}
+    return;
+  }
+
+  if (typeof value !== 'object') return;
+  if (visited.has(value)) return;
+  visited.add(value);
+  out.push(value);
+
+  if (Array.isArray(value)) {
+    value.forEach(item => deepCollectBackups(item, out, visited, depth + 1));
+    return;
+  }
+
+  Object.values(value).forEach(item => deepCollectBackups(item, out, visited, depth + 1));
+}
+
+function looksLikeDialSpaceData(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  if (Array.isArray(obj?.groups) && obj.groups.length) return true;
+  if (obj?.data && looksLikeDialSpaceData(obj.data)) return true;
+  if (obj?.backup && looksLikeDialSpaceData(obj.backup)) return true;
+  if (obj?.payload && looksLikeDialSpaceData(obj.payload)) return true;
+  return false;
+}
+
+function importFromCandidateList(candidates) {
+  if (!candidates.length) return { loaded: false, lastError: null };
+  let lastError = null;
+  for (const candidate of candidates) {
+    try {
+      const normalized = normalizeImportedCloudPayload(candidate);
+      if (!normalized || typeof normalized !== 'object' || !looksLikeDialSpaceData(normalized)) continue;
+      importData(normalized);
+      return { loaded: true, lastError: null };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  return { loaded: false, lastError };
+}
+
+function collectStorageCandidates(items) {
+  const candidates = collectCloudLoadCandidates(items);
+  const deepCandidates = [];
+  deepCollectBackups(items, deepCandidates);
+  const combinedCandidates = [...candidates, ...deepCandidates];
+  const dedup = new Set();
+  return combinedCandidates.filter(candidate => {
+    const fingerprint = typeof candidate === 'string' ? candidate.trim() : JSON.stringify(candidate);
+    if (!fingerprint || dedup.has(fingerprint)) return false;
+    dedup.add(fingerprint);
+    return true;
+  });
+}
+
+function collectLocalStorageCandidates() {
+  const out = [];
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (/(cloud|backup|speeddial|dialspace|ds2|sd2)/i.test(key)) keys.push(key);
+    }
+    keys.forEach(key => {
+      const value = localStorage.getItem(key);
+      if (value) out.push(value);
+    });
+  } catch {}
+  return out;
+}
+
+function finalizeCloudSave(payload) {
+  chrome.storage.sync.get(null, items => {
+    if (chrome.runtime.lastError) {
+      alert('Cloud save failed: ' + chrome.runtime.lastError.message);
+      return;
+    }
+    const oldKeys = getCloudKeysToRemove(items);
+    const writePayload = () => {
+      chrome.storage.sync.set(payload, () => {
+        if (chrome.runtime.lastError) {
+          alert('Cloud save failed: ' + chrome.runtime.lastError.message);
+          return;
+        }
+        chrome.storage.sync.get(null, savedItems => {
+          if (chrome.runtime.lastError) {
+            alert('Cloud save failed: ' + chrome.runtime.lastError.message);
+            return;
+          }
+          const savedStr = readCloudBackupString(savedItems);
+          if (!savedStr) {
+            alert('Cloud save failed: backup was not readable after write.');
+            return;
+          }
+          try {
+            JSON.parse(savedStr);
+            alert('Saved to Chrome Cloud ✓');
+          } catch (err) {
+            alert('Cloud save failed: backup was corrupted after write.');
+          }
+        });
+      });
+    };
+    if (oldKeys.length) {
+      chrome.storage.sync.remove(oldKeys, () => {
+        if (chrome.runtime.lastError) {
+          alert('Cloud save failed: ' + chrome.runtime.lastError.message);
+          return;
+        }
+        writePayload();
+      });
+      return;
+    }
+    writePayload();
+  });
+}
+
+function doCloudSave() {
+  const data = cloudSerialize();
+  const str = JSON.stringify(data);
+  const totalBytes = new Blob([str]).size;
+  const maxPerItemBytes = 7000;
+  const maxTotalBytes = 95000;
+  if (totalBytes > maxTotalBytes) {
+    alert('Cloud save failed: data is too large even after optimization. Remove notes, custom icons, or playlist items.');
+    return;
+  }
+
+  const parts = chunkStringByBytes(str, maxPerItemBytes);
+  const payload = { ds2cloud_chunks: parts.length };
+  if (parts.length === 1) {
+    payload.ds2cloud = parts[0];
+  } else {
+    payload.ds2cloud = '';
+    parts.forEach((part, i) => {
+      payload[`ds2cloud_${i}`] = part;
+    });
+  }
+  finalizeCloudSave(payload);
+}
+
+function doCloudLoad() {
+  chrome.storage.sync.get(null, items => {
+    if (chrome.runtime.lastError) { alert('Cloud load failed: ' + chrome.runtime.lastError.message); return; }
+    const syncCandidates = collectStorageCandidates(items);
+    const syncResult = importFromCandidateList(syncCandidates);
+    if (syncResult.loaded) {
+      saveState();
+      applySettings(true);
+      buildTabs();
+      showView(state.activeGroup);
+      closeIE();
+      alert('Loaded backup from Chrome Sync ✓');
+      return;
+    }
+
+    chrome.storage.local.get(null, localItems => {
+      if (chrome.runtime.lastError) {
+        alert('Cloud/local load failed: ' + chrome.runtime.lastError.message);
+        return;
+      }
+
+      const localCandidates = collectStorageCandidates(localItems);
+      const localStorageCandidates = collectLocalStorageCandidates();
+      const allLocalCandidates = [...localCandidates, ...localStorageCandidates];
+      const localResult = importFromCandidateList(allLocalCandidates);
+
+      if (localResult.loaded) {
+        saveState();
+        applySettings(true);
+        buildTabs();
+        showView(state.activeGroup);
+        closeIE();
+        alert('Loaded backup from legacy local storage ✓');
+        return;
+      }
+
+      const err = localResult.lastError || syncResult.lastError;
+      alert('Backup not found or invalid.\n\nIf old extension had a different extension ID, Chrome isolates its storage and direct auto-load is impossible. Import old JSON backup manually.\n\nDetails: ' + (err?.message || 'No supported backup format found.'));
+    });
+  });
+}
+
+// ─── Focus Mode ──────────────────────────────────────────────
+function restoreFocus() {
+  chrome.runtime.sendMessage({ type: 'focus-query' }, response => {
+    if (chrome.runtime.lastError) return;
+    const session = response?.session;
+    if (session && Date.now() < session.endTime) {
+      sessionStorage.setItem('ds2focus', JSON.stringify(session));
+      startFocusSession(session);
+      return;
+    }
+
+    const saved = sessionStorage.getItem('ds2focus');
+    if (!saved) return;
+    try {
+      const fallback = JSON.parse(saved);
+      if (Date.now() < fallback.endTime) startFocusSession(fallback);
+    } catch(e) { sessionStorage.removeItem('ds2focus'); }
+  });
+}
+
+function doCloudClear() {
+  chrome.storage.sync.get(null, items => {
+    if (chrome.runtime.lastError) {
+      alert('Cloud clear failed: ' + chrome.runtime.lastError.message);
+      return;
+    }
+    const keys = getCloudKeysToRemove(items);
+    if (!keys.length) {
+      alert('Chrome Cloud backup is already empty.');
+      return;
+    }
+    chrome.storage.sync.remove(keys, () => {
+      if (chrome.runtime.lastError) {
+        alert('Cloud clear failed: ' + chrome.runtime.lastError.message);
+        return;
+      }
+      alert('Chrome Cloud backup cleared.');
+    });
+  });
+}
+
+function openFocusModal(triggerEl) {
+  document.getElementById('focus-setup').style.display = focusSession ? 'none' : 'block';
+  document.getElementById('focus-active').style.display = focusSession ? 'block' : 'none';
+  if (focusSession) updateFocusActiveDisplay();
+
+  const list = document.getElementById('focus-group-list');
+  list.innerHTML = '';
+  state.groups.filter(g => !g.isHome).forEach(g => {
+    const item = document.createElement('label');
+    item.className = 'focus-group-item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = g.id;
+    if (focusSession?.blockedGroups?.includes(g.id)) { cb.checked = true; item.classList.add('blocked'); }
+    cb.addEventListener('change', () => item.classList.toggle('blocked', cb.checked));
+    item.append(cb, document.createTextNode(' ' + g.name));
+    list.appendChild(item);
+  });
+
+  openOverlay('modal-focus', triggerEl);
+}
+function closeFocusModal() { closeOverlay('modal-focus'); }
+
+function startFocus() {
+  const name = document.getElementById('focus-name-inp').value.trim() || 'Focus Session';
+  const mins = parseInt(document.getElementById('focus-duration').value) || 25;
+  const blockedGroups = Array.from(document.querySelectorAll('#focus-group-list input:checked')).map(c => c.value);
+  const hardBlock = document.getElementById('focus-hard-block').checked;
+  const showTimer = document.getElementById('focus-show-timer').checked;
+
+  // Parse blocked domains from settings
+  const blockedDomains = (state.settings.blockedDomains || '')
+    .split('\n')
+    .map(d => d.trim().replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, ''))
+    .filter(d => d.length > 0);
+
+  const session = {
+    name, mins, blockedGroups, blockedDomains, hardBlock, showTimer,
+    endTime: Date.now() + mins * 60 * 1000,
+    startTime: Date.now()
+  };
+  sessionStorage.setItem('ds2focus', JSON.stringify(session));
+  startFocusSession(session);
+
+  // Notify background service worker
+  chrome.runtime.sendMessage({ type: 'focus-start', session }, () => {
+    if (chrome.runtime.lastError) {} // ignore if background not ready
+  });
+
+  closeFocusModal();
+}
+
+function startFocusSession(session) {
+  if (focusSession?.intervalId) clearInterval(focusSession.intervalId);
+  focusSession = session;
+  document.getElementById('focus-btn').classList.add('active');
+
+  if (session.showTimer) {
+    document.getElementById('focus-bar').style.display = 'flex';
+    document.getElementById('focus-bar-label').textContent = session.name;
+    document.body.classList.add('has-focus-bar');
+  }
+
+  focusSession.intervalId = setInterval(() => {
+    const remaining = session.endTime - Date.now();
+    if (remaining <= 0) { endFocusSession(true); return; }
+    if (session.showTimer) {
+      const m = Math.floor(remaining / 60000);
+      const s = Math.floor((remaining % 60000) / 1000);
+      document.getElementById('focus-bar-timer').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+    updateFocusActiveDisplay();
+  }, 1000);
+
+  updateFocusActiveDisplay();
+}
+
+function updateFocusActiveDisplay() {
+  if (!focusSession) return;
+  const remaining = Math.max(0, focusSession.endTime - Date.now());
+  const m = Math.floor(remaining / 60000);
+  const s = Math.floor((remaining % 60000) / 1000);
+  document.getElementById('focus-timer-display').textContent = `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  document.getElementById('focus-session-label').textContent = focusSession.name;
+}
+
+function endFocusSession(auto) {
+  if (!focusSession) return;
+  clearInterval(focusSession.intervalId);
+  focusSession = null;
+  sessionStorage.removeItem('ds2focus');
+  document.getElementById('focus-btn').classList.remove('active');
+  document.getElementById('focus-bar').style.display = 'none';
+  document.body.classList.remove('has-focus-bar');
+  document.getElementById('focus-active').style.display = 'none';
+  document.getElementById('focus-setup').style.display = 'block';
+  if (auto) { closeFocusModal(); }
+  // Notify background
+  chrome.runtime.sendMessage({ type: 'focus-end' }, () => {
+    if (chrome.runtime.lastError) {}
+  });
+  renderDials();
+}
+
+function checkFocusBlock(groupId) {
+  if (!focusSession) return false;
+  return focusSession.blockedGroups.includes(groupId);
+}
+
+function showBlockedToast(hardBlock) {
+  const toast = document.getElementById('focus-blocked-toast');
+  document.getElementById('focus-blocked-msg').textContent = '🛡 Focus mode — this group is blocked';
+  document.getElementById('focus-blocked-override').style.display = hardBlock ? 'none' : 'inline-block';
+  toast.style.display = 'flex';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { toast.style.display = 'none'; }, 4000);
+}
+
+// ─── Music Player ────────────────────────────────────────────
+let playlist = [];
+let currentIdx = 0;
+let shuffleQueue = [];
+
+function resetShuffleQueue() {
+  shuffleQueue = [];
+}
+
+function buildShuffleQueue(excludeIdx = currentIdx) {
+  shuffleQueue = playlist
+    .map((_, idx) => idx)
+    .filter(idx => idx !== excludeIdx);
+
+  for (let i = shuffleQueue.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffleQueue[i], shuffleQueue[j]] = [shuffleQueue[j], shuffleQueue[i]];
+  }
+}
+
+function nextShuffleIndex() {
+  if (playlist.length <= 1) return currentIdx;
+  shuffleQueue = shuffleQueue.filter(idx => idx >= 0 && idx < playlist.length && idx !== currentIdx);
+  if (!shuffleQueue.length) buildShuffleQueue(currentIdx);
+  return shuffleQueue.shift();
+}
+
+function restorePlayer() {
+  playlist = state.player.playlist.filter(t => t.type === 'url').map(t => ({ ...t }));
+  currentIdx = state.player.currentIdx || 0;
+  audio.volume = state.player.volume;
+  document.getElementById('player-vol').value = audio.volume;
+  document.getElementById('btn-shuffle').classList.toggle('on', state.player.shuffle);
+  document.getElementById('btn-repeat').classList.toggle('on', state.player.repeat);
+  if (playlist.length) {
+    loadTrack(currentIdx, false, false);
+    if (state.settings.autoplay) audio.play().catch(() => {});
+  }
+}
+
+function loadTrack(idx, autoplay, persist = true) {
+  if (!playlist.length) return;
+  idx = ((idx % playlist.length) + playlist.length) % playlist.length;
+  currentIdx = idx;
+  shuffleQueue = shuffleQueue.filter(queueIdx => queueIdx !== idx);
+  const t = playlist[idx];
+  audio.src = t.src;
+  audio.load();
+  document.getElementById('player-title').textContent = t.name || 'Unknown';
+  document.getElementById('player-artist').textContent = t.artist || '';
+  document.getElementById('player-seek').value = 0;
+  document.getElementById('player-current').textContent = '0:00';
+  document.getElementById('player-duration').textContent = '0:00';
+  setPlayIcon(false);
+  if (autoplay) audio.play().catch(() => {});
+  state.player.currentIdx = idx;
+  if (persist) saveState();
+}
+
+function setPlayIcon(playing) {
+  document.getElementById('icon-play').style.display  = playing ? 'none' : 'block';
+  document.getElementById('icon-pause').style.display = playing ? 'block' : 'none';
+}
+
+function togglePlay() {
+  if (audio.paused) {
+    if (!audio.src && playlist.length) loadTrack(0, true);
+    else audio.play().catch(() => {});
+  } else audio.pause();
+}
+
+function nextTrack(forcePlay = false) {
+  if (!playlist.length) return;
+  const shouldAutoplay = forcePlay || !audio.paused;
+
+  if (!state.player.shuffle && !state.settings.loopPlaylist && currentIdx >= playlist.length - 1) {
+    audio.pause();
+    audio.currentTime = 0;
+    setPlayIcon(false);
+    return;
+  }
+
+  if (state.player.shuffle) {
+    loadTrack(nextShuffleIndex(), shouldAutoplay);
+  } else loadTrack(currentIdx + 1, shouldAutoplay);
+}
+
+function prevTrack() {
+  if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+  loadTrack(currentIdx - 1, !audio.paused);
+}
+
+function fmtTime(s) {
+  if (isNaN(s) || !isFinite(s)) return '0:00';
+  const m = Math.floor(s / 60), ss = Math.floor(s % 60);
+  return `${m}:${String(ss).padStart(2,'0')}`;
+}
+
+function resetPlayerUi() {
+  document.getElementById('player-title').textContent = 'No track loaded';
+  document.getElementById('player-artist').textContent = '';
+  document.getElementById('player-seek').value = 0;
+  document.getElementById('player-current').textContent = '0:00';
+  document.getElementById('player-duration').textContent = '0:00';
+  setPlayIcon(false);
+}
+
+function unloadAllTracks() {
+  audio.pause();
+  playlist.forEach(track => {
+    if (track?.type === 'file' && track.src) URL.revokeObjectURL(track.src);
+  });
+  playlist = [];
+  currentIdx = 0;
+  resetShuffleQueue();
+  state.player.playlist = [];
+  state.player.currentIdx = 0;
+  state.player.position = 0;
+  audio.removeAttribute('src');
+  audio.load();
+  resetPlayerUi();
+  document.getElementById('file-input').value = '';
+  document.getElementById('folder-input').value = '';
+  closeOverlay('music-prompt');
+  saveState();
+}
+
+// ─── visibilitychange ────────────────────────────────────────
+function handleVisibilityChange() {
+  if (document.hidden && !audio.paused) {
+    const policy = state.settings.musicLeave;
+    if (policy === 'stop') {
+      audio.pause();
+    } else if (policy === 'ask') {
+      openOverlay('music-prompt');
+      // Send notification via background
+      chrome.runtime.sendMessage({ type: 'music-notify' }, () => {
+        if (chrome.runtime.lastError) {}
+      });
+    }
+    // 'continue' — do nothing
+  }
+}
+
+// Audio events
+audio.addEventListener('timeupdate', () => {
+  if (!audio.duration) return;
+  if (!playerSeeking) {
+    const pct = (audio.currentTime / audio.duration) * 100;
+    document.getElementById('player-seek').value = pct;
+  }
+  document.getElementById('player-current').textContent = fmtTime(audio.currentTime);
+});
+audio.addEventListener('durationchange', () => {
+  document.getElementById('player-duration').textContent = fmtTime(audio.duration);
+});
+audio.addEventListener('play',  () => setPlayIcon(true));
+audio.addEventListener('pause', () => setPlayIcon(false));
+audio.addEventListener('ended', () => {
+  if (state.player.repeat) { audio.currentTime = 0; audio.play(); }
+  else nextTrack(true);
+});
+
+function loadFilesIntoPlaylist(files) {
+  const tracks = Array.from(files).map(f => ({
+    name: f.name.replace(/\.[^.]+$/, ''),
+    artist: '',
+    src: URL.createObjectURL(f),
+    type: 'file'
+  }));
+  playlist.push(...tracks);
+  resetShuffleQueue();
+  state.player.playlist.push(...tracks.map(t => ({ name: t.name, artist: t.artist, type: 'file', src: null })));
+  if (!audio.src || audio.src === window.location.href) loadTrack(playlist.length - tracks.length, false);
+  if (state.settings.autoplay) audio.play().catch(() => {});
+  updatePlayerList();
+}
+
+function loadUrlIntoPlaylist(url) {
+  if (!url) return;
+  const name = url.split('/').pop().split('?')[0] || 'Stream';
+  const track = { name, artist: '', src: url, type: 'url' };
+  playlist.push(track);
+  resetShuffleQueue();
+  state.player.playlist.push({ ...track });
+  if (!audio.src || audio.src === window.location.href) loadTrack(playlist.length - 1, true);
+  saveState();
+  updatePlayerList();
+}
+
+function updatePlayerList() {
+  if (!playlist.length) {
+    resetPlayerUi();
+  }
+}
+
+// ─── Icon Search ─────────────────────────────────────────────
+function buildIconSearchUrls(query, source) {
+  const urls = [];
+  const domain = query.replace(/\s+/g, '').toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/.*$/, '');
+  const tlds = ['.com', '.io', '.org', '.net', '.co', '.dev', '.app', '.me', '.tv', '.ai', '.gg'];
+
+  if (source === 'google') {
+    for (const sz of [128, 64, 32]) {
+      urls.push(`https://www.google.com/s2/favicons?domain=${domain}.com&sz=${sz}`);
+    }
+    for (const tld of tlds.slice(0, 6)) {
+      urls.push(`https://www.google.com/s2/favicons?domain=${domain}${tld}&sz=64`);
+      urls.push(`https://www.google.com/s2/favicons?domain=www.${domain}${tld}&sz=64`);
+    }
+  } else if (source === 'duckduckgo') {
+    for (const tld of tlds) {
+      urls.push(`https://icons.duckduckgo.com/ip3/${domain}${tld}.ico`);
+      urls.push(`https://icons.duckduckgo.com/ip3/www.${domain}${tld}.ico`);
+    }
+  } else if (source === 'clearbit') {
+    for (const tld of tlds.slice(0, 6)) {
+      urls.push(`https://logo.clearbit.com/${domain}${tld}`);
+    }
+  } else if (source === 'brandfetch') {
+    for (const tld of tlds.slice(0, 6)) {
+      urls.push(`https://cdn.brandfetch.io/${domain}${tld}/w/400/h/400`);
+      urls.push(`https://cdn.brandfetch.io/www.${domain}${tld}/w/400/h/400`);
+    }
+  } else if (source === 'iconhorse') {
+    for (const tld of tlds) {
+      urls.push(`https://icon.horse/icon/${domain}${tld}`);
+    }
+    // Also try unavatar and faviconkit as bonus
+    urls.push(`https://unavatar.io/${domain}`);
+    for (const tld of tlds.slice(0, 4)) {
+      urls.push(`https://api.faviconkit.com/${domain}${tld}/144`);
+    }
+  }
+  return urls;
+}
+
+function doIconSearch() {
+  const query = document.getElementById('icon-search-inp').value.trim();
+  if (!query) return;
+  const results = document.getElementById('icon-results');
+  results.innerHTML = '<div style="color:var(--muted);font-size:13px;grid-column:1/-1">Loading…</div>';
+
+  const urls = buildIconSearchUrls(query, iconSearchSource);
+  results.innerHTML = '';
+
+  urls.forEach(url => {
+    const wrap = document.createElement('div');
+    wrap.className = 'icon-option';
+    const img = document.createElement('img');
+    img.src = url;
+    img.style.display = 'none';
+    img.onload = () => {
+      if (img.naturalWidth >= 1) { img.style.display = 'block'; wrap.style.display = 'flex'; }
+    };
+    img.onerror = () => { wrap.remove(); };
+    wrap.style.display = 'none';
+    wrap.appendChild(img);
+    wrap.addEventListener('click', () => {
+      document.querySelectorAll('.icon-option').forEach(o => o.classList.remove('selected'));
+      wrap.classList.add('selected');
+      selectedIconUrl = url;
+      const sel = document.getElementById('icon-selected-preview');
+      sel.style.display = 'flex';
+      document.getElementById('icon-sel-img').src = url;
+      document.getElementById('icon-sel-label').textContent = query;
+    });
+    results.appendChild(wrap);
+  });
+}
+
+// ─── Helpers ─────────────────────────────────────────────────
+function fileToB64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+function setupOverlayPanels() {
+  document.querySelectorAll('.overlay-panel').forEach(panel => {
+    panel.style.display = 'flex';
+  });
+}
+
+function syncBodyModalState() {
+  const hasOpenPanels = !!document.querySelector('.overlay-panel.is-open');
+  document.body.classList.toggle('animating-modal', hasOpenPanels);
+}
+
+function setOverlayOrigin(panel, triggerEl) {
+  if (!panel) return;
+  let x = window.innerWidth / 2;
+  let y = window.innerHeight * 0.18;
+  if (triggerEl?.getBoundingClientRect) {
+    const rect = triggerEl.getBoundingClientRect();
+    x = rect.left + rect.width / 2;
+    y = rect.top + rect.height / 2;
+  }
+  const centerX = window.innerWidth / 2;
+  const centerY = window.innerHeight / 2;
+  const shiftX = Math.round((x - centerX) * 0.82);
+  const shiftY = Math.round((y - centerY) * 0.9);
+  panel.style.setProperty('--panel-origin-x', `${Math.round(x)}px`);
+  panel.style.setProperty('--panel-origin-y', `${Math.round(y)}px`);
+  panel.style.setProperty('--lamp-shift-x', `${shiftX}px`);
+  panel.style.setProperty('--lamp-shift-y', `${shiftY}px`);
+  panel.style.setProperty('--lamp-skew-x', `${shiftX >= 0 ? 12 : -12}deg`);
+}
+
+function openOverlay(id, triggerEl) {
+  const panel = document.getElementById(id);
+  if (!panel) return;
+  setOverlayOrigin(panel, triggerEl);
+  panel.classList.remove('is-closing');
+  panel.style.display = panel.id === 'ctx-menu' || panel.id === 'ctx-move-sub' ? 'block' : 'flex';
+  requestAnimationFrame(() => panel.classList.add('is-open'));
+  syncBodyModalState();
+}
+
+function closeOverlay(id) {
+  const panel = document.getElementById(id);
+  if (!panel || (!panel.classList.contains('is-open') && !panel.classList.contains('is-closing'))) return;
+  panel.classList.remove('is-open');
+  panel.classList.add('is-closing');
+  setTimeout(() => {
+    panel.classList.remove('is-closing');
+    syncBodyModalState();
+  }, MODAL_CLOSE_MS);
+}
+
+// ─── Bind All Events ─────────────────────────────────────────
+function bindAll() {
+
+  // Add tab
+  document.getElementById('add-tab-btn').addEventListener('click', e => openTabModal(null, e.currentTarget));
+
+  // Focus mode
+  document.getElementById('focus-btn').addEventListener('click', e => openFocusModal(e.currentTarget));
+  document.getElementById('focus-cancel').addEventListener('click', closeFocusModal);
+  document.getElementById('modal-focus').addEventListener('click', e => { if (e.target === e.currentTarget) closeFocusModal(); });
+  document.getElementById('focus-start-btn').addEventListener('click', startFocus);
+  document.getElementById('focus-stop-btn').addEventListener('click', () => endFocusSession(false));
+  document.getElementById('focus-bar-end').addEventListener('click', () => endFocusSession(false));
+  document.querySelectorAll('.focus-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('focus-duration').value = btn.dataset.min;
+      document.querySelectorAll('.focus-preset').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  document.getElementById('focus-blocked-override').addEventListener('click', () => {
+    document.getElementById('focus-blocked-toast').style.display = 'none';
+    if (window._lastBlockedUrl) { window.location.href = window._lastBlockedUrl; }
+  });
+  document.getElementById('backup-toast-save').addEventListener('click', saveBackupToFile);
+  document.getElementById('backup-toast-later').addEventListener('click', hideBackupPrompt);
+
+  // Settings
+  document.getElementById('settings-btn').addEventListener('click', e => openSettings(e.currentTarget));
+  document.getElementById('s-cancel').addEventListener('click', closeSettings);
+  document.getElementById('s-save').addEventListener('click', saveSettings);
+  document.getElementById('modal-settings').addEventListener('click', e => { if (e.target === e.currentTarget) closeSettings(); });
+
+  document.querySelectorAll('input[name="bg-type"]').forEach(r => r.addEventListener('change', () => {
+    document.getElementById('s-bg-color').style.display = r.value === 'solid' && r.checked ? 'block' : 'none';
+    document.getElementById('s-bg-image').style.display = r.value === 'image' && r.checked ? 'block' : 'none';
+  }));
+  document.getElementById('bg-img-file').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const b = await fileToB64(f);
+    const p = document.getElementById('bg-img-preview'); p.src = b; p.style.display = 'block';
+  });
+  document.getElementById('overlay-opacity').addEventListener('input', e => {
+    document.getElementById('overlay-val').textContent = parseFloat(e.target.value).toFixed(2);
+    document.documentElement.style.setProperty('--overlay-op', e.target.value);
+  });
+
+  // Import/Export + Cloud
+  document.getElementById('import-export-btn').addEventListener('click', e => openIE(e.currentTarget));
+  document.getElementById('ie-close').addEventListener('click', closeIE);
+  document.getElementById('modal-ie').addEventListener('click', e => { if (e.target === e.currentTarget) closeIE(); });
+  document.getElementById('ie-export-min').addEventListener('click', doExportMinimal);
+  document.getElementById('ie-export-full').addEventListener('click', doExportFull);
+  document.getElementById('ie-import-btn').addEventListener('click', () => document.getElementById('ie-import-file').click());
+  document.getElementById('ie-import-file').addEventListener('change', e => { if (e.target.files[0]) doImport(e.target.files[0]); });
+  document.getElementById('ie-import-fvd-btn').addEventListener('click', () => document.getElementById('ie-import-fvd-file').click());
+  document.getElementById('ie-import-fvd-file').addEventListener('change', e => { if (e.target.files[0]) doImportFvd(e.target.files[0]); });
+  document.getElementById('ie-import-fvd-text-btn').addEventListener('click', () => {
+    try {
+      importFvdText(document.getElementById('ie-import-fvd-text').value);
+    } catch(err) {
+      alert('FVD import failed: ' + err.message);
+    }
+  });
+  document.getElementById('ie-reset').addEventListener('click', doReset);
+  document.getElementById('ie-cloud-save').addEventListener('click', doCloudSave);
+  document.getElementById('ie-cloud-load').addEventListener('click', doCloudLoad);
+  document.getElementById('ie-cloud-clear').addEventListener('click', doCloudClear);
+
+  // Dial modal
+  document.getElementById('modal-dial-cancel').addEventListener('click', closeDialModal);
+  document.getElementById('modal-dial-save').addEventListener('click', saveDialModal);
+  document.getElementById('modal-dial').addEventListener('click', e => { if (e.target === e.currentTarget) closeDialModal(); });
+  document.getElementById('dial-url-inp').addEventListener('keydown', e => { if (e.key === 'Enter') saveDialModal(); });
+
+  document.querySelectorAll('input[name="icon-src"]').forEach(r => r.addEventListener('change', () => {
+    document.getElementById('icon-search-area').style.display = r.value === 'search' && r.checked ? 'block' : 'none';
+    document.getElementById('icon-upload-area').style.display = r.value === 'upload' && r.checked ? 'block' : 'none';
+  }));
+  document.getElementById('icon-search-btn').addEventListener('click', doIconSearch);
+  document.getElementById('icon-search-inp').addEventListener('keydown', e => { if (e.key === 'Enter') doIconSearch(); });
+  document.querySelectorAll('.isrc-tab').forEach(btn => btn.addEventListener('click', () => {
+    document.querySelectorAll('.isrc-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    iconSearchSource = btn.dataset.src;
+    if (document.getElementById('icon-search-inp').value.trim()) doIconSearch();
+  }));
+  document.getElementById('icon-sel-clear').addEventListener('click', () => {
+    selectedIconUrl = null;
+    document.getElementById('icon-selected-preview').style.display = 'none';
+    document.querySelectorAll('.icon-option').forEach(o => o.classList.remove('selected'));
+  });
+  document.getElementById('dial-icon-file').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const b = await fileToB64(f);
+    const p = document.getElementById('dial-icon-preview'); p.src = b; p.style.display = 'block';
+  });
+
+  // Tab modal
+  document.getElementById('modal-tab-cancel').addEventListener('click', closeTabModal);
+  document.getElementById('modal-tab-save').addEventListener('click', saveTabModal);
+  document.getElementById('tab-delete-btn').addEventListener('click', deleteTab);
+  document.getElementById('modal-tab').addEventListener('click', e => { if (e.target === e.currentTarget) closeTabModal(); });
+  document.getElementById('tab-name-inp').addEventListener('keydown', e => { if (e.key === 'Enter') saveTabModal(); });
+
+  // Context menu
+  document.getElementById('ctx-edit').addEventListener('click', () => { if (ctxDialId) { openDialModal(ctxDialId); hideCtx(); } });
+  document.getElementById('ctx-del').addEventListener('click', () => {
+    if (!ctxDialId) return;
+    for (const g of state.groups) { const i = g.dials.findIndex(d => d.id === ctxDialId); if (i !== -1) { g.dials.splice(i,1); break; } }
+    saveState(); renderDials(); hideCtx();
+  });
+  document.getElementById('ctx-move').addEventListener('click', () => {
+    const sub = document.getElementById('ctx-move-sub');
+    sub.innerHTML = '';
+    state.groups.filter(g => !g.isHome && g.id !== state.activeGroup).forEach(g => {
+      const item = document.createElement('div');
+      item.className = 'ctx-item';
+      item.textContent = g.name;
+      item.addEventListener('click', () => { moveDial(ctxDialId, g.id); hideCtx(); });
+      sub.appendChild(item);
+    });
+    if (!sub.children.length) {
+      const n = document.createElement('div');
+      n.className = 'ctx-item'; n.style.color = 'var(--muted)';
+      n.textContent = 'No other groups'; sub.appendChild(n);
+    }
+    sub.style.display = 'block';
+    const r = document.getElementById('ctx-menu').getBoundingClientRect();
+    positionEl(sub, r.right + 4, r.top);
+    requestAnimationFrame(() => sub.classList.add('is-open'));
+  });
+  document.addEventListener('mousedown', e => {
+    isSelectingCtxText = document.getElementById('ctx-menu').contains(e.target) ||
+      document.getElementById('ctx-move-sub').contains(e.target);
+    if (!isSelectingCtxText && !window.getSelection()?.toString()) hideCtx();
+  });
+  document.addEventListener('mouseup', e => {
+    const hasSelection = !!window.getSelection()?.toString();
+    if (hasSelection && isSelectingCtxText) return;
+    if (!document.getElementById('ctx-menu').contains(e.target) &&
+        !document.getElementById('ctx-move-sub').contains(e.target)) hideCtx();
+  });
+
+  const dialsView = document.getElementById('view-dials');
+  dialsView.addEventListener('contextmenu', e => {
+    if (e.target.closest('.dial-card')) return;
+    if (e.target.closest('#ctx-menu') || e.target.closest('#ctx-move-sub')) return;
+    e.preventDefault();
+    hideCtx();
+    openDialModal(null);
+  });
+
+  // Music player
+  document.getElementById('btn-play').addEventListener('click', togglePlay);
+  document.getElementById('btn-next').addEventListener('click', nextTrack);
+  document.getElementById('btn-prev').addEventListener('click', prevTrack);
+  document.getElementById('btn-shuffle').addEventListener('click', () => {
+    state.player.shuffle = !state.player.shuffle;
+    resetShuffleQueue();
+    document.getElementById('btn-shuffle').classList.toggle('on', state.player.shuffle);
+    saveState();
+  });
+  document.getElementById('btn-repeat').addEventListener('click', () => {
+    state.player.repeat = !state.player.repeat;
+    document.getElementById('btn-repeat').classList.toggle('on', state.player.repeat);
+    saveState();
+  });
+  const seekEl = document.getElementById('player-seek');
+  const setSeeking = v => {
+    if (playerSeeking === v) return;
+    playerSeeking = v;
+    if (v) {
+      wasPlayingBeforeSeek = !audio.paused;
+      if (wasPlayingBeforeSeek) audio.pause();
+      return;
+    }
+    if (wasPlayingBeforeSeek) audio.play().catch(() => {});
+    wasPlayingBeforeSeek = false;
+  };
+  seekEl.addEventListener('pointerdown', () => setSeeking(true));
+  seekEl.addEventListener('pointerup', () => setSeeking(false));
+  seekEl.addEventListener('pointercancel', () => setSeeking(false));
+  window.addEventListener('pointerup', () => setSeeking(false));
+  seekEl.addEventListener('input', e => {
+    if (!audio.duration) return;
+    const t = (e.target.value / 100) * audio.duration;
+    audio.currentTime = t;
+    document.getElementById('player-current').textContent = fmtTime(t);
+  });
+  document.getElementById('player-vol').addEventListener('input', e => {
+    audio.volume = parseFloat(e.target.value);
+    state.player.volume = audio.volume;
+    saveState();
+  });
+  document.getElementById('btn-load-file').addEventListener('click', () => document.getElementById('file-input').click());
+  document.getElementById('file-input').addEventListener('change', e => { if (e.target.files.length) loadFilesIntoPlaylist(e.target.files); });
+  document.getElementById('btn-load-folder').addEventListener('click', () => document.getElementById('folder-input').click());
+  document.getElementById('folder-input').addEventListener('change', e => { if (e.target.files.length) loadFilesIntoPlaylist(e.target.files); });
+  document.getElementById('btn-unload-all').addEventListener('click', unloadAllTracks);
+  document.getElementById('btn-load-url').addEventListener('click', () => {
+    document.getElementById('stream-url-input').value = '';
+    openOverlay('modal-url', document.getElementById('btn-load-url'));
+  });
+  document.getElementById('modal-url-cancel').addEventListener('click', () => { closeOverlay('modal-url'); });
+  document.getElementById('modal-url-ok').addEventListener('click', () => {
+    const url = document.getElementById('stream-url-input').value.trim();
+    if (url) { loadUrlIntoPlaylist(url); closeOverlay('modal-url'); }
+  });
+  document.getElementById('stream-url-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('modal-url-ok').click();
+  });
+
+  // Music leave prompt
+  document.getElementById('mp-stop').addEventListener('click', () => {
+    audio.pause();
+    closeOverlay('music-prompt');
+  });
+  document.getElementById('mp-keep').addEventListener('click', () => {
+    closeOverlay('music-prompt');
+  });
+
+  // Notes — autosave with debounce
+  document.getElementById('notes-area').addEventListener('input', e => {
+    state.notes = e.target.value;
+    clearTimeout(notesSaveTimer);
+    notesSaveTimer = setTimeout(() => saveState(), 500);
+  });
+
+  // ESC closes all modals
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    closeDialModal(); closeTabModal(); closeSettings(); closeIE(); closeFocusModal();
+    closeOverlay('modal-url');
+    closeOverlay('music-prompt');
+    hideCtx();
+  });
+
+  window.addEventListener('resize', updateTabsActivePill);
+  window.addEventListener('resize', () => {
+    clearTimeout(starsResizeTimer);
+    starsResizeTimer = setTimeout(() => {
+      if (state.settings.bgType === 'stars') drawStars();
+    }, 120);
+  });
+  document.getElementById('tabs-scroll').addEventListener('scroll', updateTabsActivePill, { passive: true });
+}

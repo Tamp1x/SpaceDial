@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DialSpace — Focus Mode</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+@font-face {
+  font-family: 'Anurati';
+  src: url('https://cdn.jsdelivr.net/gh/FontFaceKit/anurati@1.0/fonts/Anurati-Regular.otf') format('opentype');
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #07070e;
+  --surface: rgba(255,255,255,0.045);
+  --border: rgba(255,255,255,0.08);
+  --border-hov: rgba(255,255,255,0.2);
+  --text: #f0f0f0;
+  --muted: rgba(255,255,255,0.38);
+  --danger: #e05555;
+  --radius: 14px;
+}
+
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  background: var(--bg); color: var(--text);
+  font-family: 'Rajdhani', sans-serif;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* Animated background */
+#stars-canvas {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+}
+
+.wrap {
+  position: relative; z-index: 10;
+  text-align: center;
+  max-width: 480px; width: 100%; padding: 32px;
+}
+
+.shield-icon {
+  margin: 0 auto 28px;
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  background: rgba(224,85,85,0.1);
+  border: 1px solid rgba(224,85,85,0.25);
+  display: flex; align-items: center; justify-content: center;
+}
+
+.title {
+  font-family: 'Anurati', 'Bebas Neue', sans-serif;
+  font-size: 32px; letter-spacing: 0.15em; color: #fff;
+  margin-bottom: 8px;
+}
+
+.session-name {
+  font-family: 'Rajdhani', sans-serif; font-size: 14px;
+  font-weight: 600; letter-spacing: 0.14em;
+  color: rgba(255,180,60,0.9); text-transform: uppercase;
+  margin-bottom: 28px;
+}
+
+.blocked-url {
+  font-size: 13px; color: var(--muted);
+  margin-bottom: 32px; word-break: break-all;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 16px;
+}
+
+.timer-label {
+  font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 6px;
+}
+
+.countdown {
+  font-family: 'Anurati', 'Bebas Neue', sans-serif;
+  font-size: 56px; letter-spacing: 0.1em; color: #fff;
+  text-shadow: 0 0 40px rgba(255,180,60,0.3);
+  margin-bottom: 40px;
+}
+
+.countdown.done { color: rgba(255,255,255,0.4); }
+
+.btn-row {
+  display: flex; flex-direction: column; gap: 12px;
+  align-items: center;
+}
+
+.btn {
+  font-family: 'Rajdhani', sans-serif; font-size: 14px;
+  font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 13px 32px; border-radius: 10px;
+  cursor: pointer; border: none; transition: all .18s;
+  width: 100%; max-width: 320px;
+}
+
+.btn-go {
+  background: rgba(255,255,255,0.9); color: #000;
+}
+.btn-go:hover { background: #fff; }
+
+.btn-wait {
+  background: rgba(255,255,255,0.07); color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-wait:hover { background: rgba(255,255,255,0.13); border-color: var(--border-hov); }
+.btn-wait.loading { cursor: default; opacity: 0.7; }
+
+.note {
+  margin-top: 24px; font-size: 12px; color: var(--muted);
+  letter-spacing: 0.06em;
+}
+</style>
+</head>
+<body>
+
+<canvas id="stars-canvas"></canvas>
+
+<div class="wrap">
+  <div class="shield-icon">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#e05555" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+  </div>
+
+  <div class="title">Focus Mode</div>
+  <div class="session-name" id="session-name">Active Session</div>
+
+  <div class="blocked-url" id="blocked-url-display"></div>
+
+  <div class="timer-label">Session ends in</div>
+  <div class="countdown" id="countdown">00:00</div>
+
+  <div class="btn-row">
+    <button class="btn btn-go" id="btn-go">Go to DialSpace</button>
+    <button class="btn btn-wait" id="btn-wait">Wait for timer to end</button>
+  </div>
+
+  <div class="note" id="note-text">Stay focused. You can do it.</div>
+</div>
+
+<script src="blocked.js"></script>
+</body>
+</html>
