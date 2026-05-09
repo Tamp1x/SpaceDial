@@ -34,6 +34,7 @@ const DEFAULT_STATE = () => ({
     weatherForecastDays: 7,
     showPlayer: true,
     showNotes: true,
+    speedTestMode: 'ookla',
     musicLeave: 'stop',
     autoplay: false,
     loopPlaylist: true,
@@ -92,6 +93,7 @@ let pendingBackupSnapshot = null;
 let lastBackupFingerprint = '';
 let lastPromptFingerprint = '';
 let backupPromptVisible = false;
+let storageFallbackNoticeShown = false;
 
 // ─── Init ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -126,7 +128,24 @@ function saveState(options = {}) {
     type: t.type,
     src: t.type === 'url' ? t.src : null
   })).filter(t => t.type === 'url' || t.src);
-  chrome.storage.local.set({ ds2: s });
+  chrome.storage.local.set({ ds2: s }, () => {
+    if (!chrome.runtime.lastError) return;
+    console.warn('DialSpace storage save failed:', chrome.runtime.lastError.message);
+    if (!s.settings?.bgImage) return;
+
+    // Fallback when custom wallpaper is too large for storage quota.
+    const fallback = JSON.parse(JSON.stringify(s));
+    fallback.settings.bgImage = null;
+    if (fallback.settings.bgType === 'image') fallback.settings.bgType = 'stars';
+    chrome.storage.local.set({ ds2: fallback }, () => {});
+    state.settings.bgImage = null;
+    if (state.settings.bgType === 'image') state.settings.bgType = 'stars';
+    applySettings();
+    if (!storageFallbackNoticeShown) {
+      storageFallbackNoticeShown = true;
+      alert('Custom background image is too large for browser storage. Please use a smaller image.');
+    }
+  });
   if (scheduleBackup) scheduleBackupPrompt(s);
 }
 
@@ -567,6 +586,17 @@ async function fetchWeather() {
     document.getElementById('weather-desc').textContent = 'UNAVAILABLE';
     document.getElementById('weather-forecast').innerHTML = '';
   }
+}
+
+function setPickedFileName(labelEl, file) {
+  if (!labelEl) return;
+  if (!file?.name) {
+    labelEl.textContent = 'No file selected';
+    return;
+  }
+  const maxLen = 28;
+  const text = file.name.length > maxLen ? `${file.name.slice(0, maxLen - 1)}...` : file.name;
+  labelEl.textContent = text;
 }
 function normalizeForecastDays(value) {
   return Number(value) === 16 ? 16 : 7;
@@ -1024,6 +1054,7 @@ function openDialModal(dialId) {
   preview.src = d?.customIcon || '';
   preview.style.display = hasCustomIcon ? 'block' : 'none';
   document.getElementById('dial-icon-file').value = '';
+  document.getElementById('dial-icon-file-name').textContent = hasCustomIcon ? 'Current image' : 'No file selected';
   openOverlay('modal-dial');
   document.getElementById('dial-name-inp').focus();
 }
@@ -1256,6 +1287,8 @@ function openSettings(triggerEl) {
   document.getElementById('s-bg-color').style.display = s.bgType === 'solid' ? 'block' : 'none';
   document.getElementById('s-bg-image').style.display = s.bgType === 'image' ? 'block' : 'none';
   if (s.bgImage) { const p = document.getElementById('bg-img-preview'); p.src = s.bgImage; p.style.display = 'block'; }
+  document.getElementById('bg-img-file').value = '';
+  document.getElementById('bg-img-file-name').textContent = s.bgImage ? 'Current image' : 'No file selected';
   document.getElementById('overlay-opacity').value = s.overlayOp;
   document.getElementById('overlay-val').textContent = s.overlayOp;
   document.getElementById('s-cols').value = s.cols;
@@ -1276,6 +1309,7 @@ function openSettings(triggerEl) {
   document.getElementById('s-weather-forecast-days').value = String(normalizeForecastDays(s.weatherForecastDays));
   document.getElementById('s-show-player').checked = s.showPlayer;
   document.getElementById('s-show-notes').checked = s.showNotes;
+  document.getElementById('s-speedtest-mode').value = s.speedTestMode || 'ookla';
   document.getElementById('s-weather-city').value = s.weatherCity;
   document.getElementById('s-temp-unit').value = s.tempUnit;
   document.getElementById('s-music-leave').value = s.musicLeave;
@@ -1310,6 +1344,7 @@ async function saveSettings() {
   s.weatherForecastDays = normalizeForecastDays(document.getElementById('s-weather-forecast-days').value);
   s.showPlayer = document.getElementById('s-show-player').checked;
   s.showNotes = document.getElementById('s-show-notes').checked;
+  s.speedTestMode = document.getElementById('s-speedtest-mode').value || 'ookla';
   s.weatherCity = document.getElementById('s-weather-city').value.trim() || 'Dublin';
   s.tempUnit = document.getElementById('s-temp-unit').value;
   s.musicLeave = document.getElementById('s-music-leave').value;
@@ -1322,7 +1357,8 @@ async function saveSettings() {
   const bgFile = document.getElementById('bg-img-file').files[0];
   if (bgFile) {
     const raw = await fileToB64(bgFile);
-    s.bgImage = await optimizeImage(raw, 1920);
+    s.bgImage = await optimizeImage(raw, 1400, 420 * 1024);
+    s.bgType = 'image';
   }
   if (s.bgType !== 'image') s.bgImage = null;
 
@@ -1335,24 +1371,90 @@ async function saveSettings() {
 }
 
 // ─── Image optimization ──────────────────────────────────────
-function optimizeImage(dataUrl, maxW) {
+function dataUrlBytes(dataUrl) {
+  if (typeof dataUrl !== 'string') return Infinity;
+  const base64 = dataUrl.split(',')[1];
+  if (!base64) return Infinity;
+  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
+function optimizeImage(dataUrl, maxW, maxBytes = 420 * 1024) {
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
-      if (img.width <= maxW) { resolve(dataUrl); return; }
-      const scale = maxW / img.width;
-      const canvas = document.createElement('canvas');
-      canvas.width = maxW;
-      canvas.height = Math.round(img.height * scale);
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      // Use webp if available for smaller size, fallback to jpeg
-      const out = canvas.toDataURL('image/webp', 0.85) || canvas.toDataURL('image/jpeg', 0.85);
-      resolve(out);
+      let targetWidth = Math.min(img.width, maxW);
+      let best = dataUrl;
+
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const scale = targetWidth / img.width;
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(targetWidth));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) break;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const candidates = [
+          canvas.toDataURL('image/webp', 0.82),
+          canvas.toDataURL('image/webp', 0.72),
+          canvas.toDataURL('image/webp', 0.62),
+          canvas.toDataURL('image/jpeg', 0.82),
+          canvas.toDataURL('image/jpeg', 0.72),
+          canvas.toDataURL('image/jpeg', 0.62)
+        ].filter(v => typeof v === 'string' && v.startsWith('data:image'));
+
+        for (const candidate of candidates) {
+          const bytes = dataUrlBytes(candidate);
+          if (bytes < dataUrlBytes(best)) best = candidate;
+          if (bytes <= maxBytes) {
+            resolve(candidate);
+            return;
+          }
+        }
+        targetWidth *= 0.75;
+      }
+      resolve(best);
     };
     img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
   });
+}
+
+function openSpeedTestPanel() {
+  const panel = document.getElementById('speedtest-panel');
+  const frame = document.getElementById('speedtest-frame');
+  if (!panel || !frame) return;
+  if (!frame.src) frame.src = chrome.runtime.getURL('speedtest.html');
+  panel.style.display = 'block';
+  requestAnimationFrame(() => panel.classList.add('open'));
+}
+
+function closeSpeedTestPanel() {
+  const panel = document.getElementById('speedtest-panel');
+  if (!panel) return;
+  panel.classList.remove('open');
+  setTimeout(() => {
+    if (!panel.classList.contains('open')) panel.style.display = 'none';
+  }, 220);
+}
+
+function toggleSpeedTestPanel() {
+  const panel = document.getElementById('speedtest-panel');
+  if (!panel || panel.classList.contains('open')) {
+    closeSpeedTestPanel();
+    return;
+  }
+  openSpeedTestPanel();
+}
+
+function openSpeedTest() {
+  const mode = state.settings.speedTestMode || 'ookla';
+  if (mode === 'internal') {
+    toggleSpeedTestPanel();
+    return;
+  }
+  chrome.tabs.create({ url: 'https://www.speedtest.net/' });
 }
 
 // ─── Import / Export ─────────────────────────────────────────
@@ -2322,6 +2424,8 @@ function bindAll() {
   document.getElementById('backup-toast-later').addEventListener('click', hideBackupPrompt);
 
   // Settings
+  document.getElementById('speedtest-btn').addEventListener('click', openSpeedTest);
+  document.getElementById('speedtest-panel-close').addEventListener('click', closeSpeedTestPanel);
   document.getElementById('settings-btn').addEventListener('click', e => openSettings(e.currentTarget));
   document.getElementById('s-cancel').addEventListener('click', closeSettings);
   document.getElementById('s-save').addEventListener('click', saveSettings);
@@ -2331,8 +2435,16 @@ function bindAll() {
     document.getElementById('s-bg-color').style.display = r.value === 'solid' && r.checked ? 'block' : 'none';
     document.getElementById('s-bg-image').style.display = r.value === 'image' && r.checked ? 'block' : 'none';
   }));
+  document.getElementById('bg-img-file-btn').addEventListener('click', () => {
+    document.getElementById('bg-img-file').click();
+  });
   document.getElementById('bg-img-file').addEventListener('change', async e => {
     const f = e.target.files[0]; if (!f) return;
+    const bgImageRadio = document.querySelector('input[name="bg-type"][value="image"]');
+    if (bgImageRadio) bgImageRadio.checked = true;
+    document.getElementById('s-bg-color').style.display = 'none';
+    document.getElementById('s-bg-image').style.display = 'block';
+    setPickedFileName(document.getElementById('bg-img-file-name'), f);
     const b = await fileToB64(f);
     const p = document.getElementById('bg-img-preview'); p.src = b; p.style.display = 'block';
   });
@@ -2386,8 +2498,12 @@ function bindAll() {
     document.getElementById('icon-selected-preview').style.display = 'none';
     document.querySelectorAll('.icon-option').forEach(o => o.classList.remove('selected'));
   });
+  document.getElementById('dial-icon-file-btn').addEventListener('click', () => {
+    document.getElementById('dial-icon-file').click();
+  });
   document.getElementById('dial-icon-file').addEventListener('change', async e => {
     const f = e.target.files[0]; if (!f) return;
+    setPickedFileName(document.getElementById('dial-icon-file-name'), f);
     const b = await fileToB64(f);
     const p = document.getElementById('dial-icon-preview'); p.src = b; p.style.display = 'block';
   });
@@ -2529,6 +2645,7 @@ function bindAll() {
     closeDialModal(); closeTabModal(); closeSettings(); closeIE(); closeFocusModal();
     closeOverlay('modal-url');
     closeOverlay('music-prompt');
+    closeSpeedTestPanel();
     hideCtx();
   });
 

@@ -142,7 +142,7 @@ body.animating-modal { overflow:hidden; }
   box-shadow:0 0 0 2px rgba(255,255,255,0.2);
 }
 
-#add-tab-btn, #settings-btn, #import-export-btn, #focus-btn {
+#add-tab-btn, #settings-btn, #import-export-btn, #focus-btn, #speedtest-btn {
   width:32px; height:32px; border-radius:50%;
   border:1px solid var(--border); background:transparent;
   color:var(--muted); font-size:16px; cursor:pointer;
@@ -155,12 +155,77 @@ body.animating-modal { overflow:hidden; }
     box-shadow .28s ease;
   flex-shrink:0;
 }
-#add-tab-btn:hover, #settings-btn:hover, #import-export-btn:hover, #focus-btn:hover {
+#add-tab-btn:hover, #settings-btn:hover, #import-export-btn:hover, #focus-btn:hover, #speedtest-btn:hover {
   background:var(--surface); color:#fff; border-color:var(--border-hov);
   transform:translateY(-2px) scale(1.05);
   box-shadow:0 12px 28px rgba(0,0,0,0.22);
 }
 #settings-btn:hover { transform:rotate(45deg); }
+#speedtest-btn svg { opacity:0.88; }
+#speedtest-btn:hover svg { opacity:1; }
+
+#speedtest-panel {
+  position: fixed;
+  top: calc(var(--tab-h) + 10px);
+  right: 12px;
+  width: 420px;
+  height: min(620px, calc(100vh - var(--tab-h) - 24px));
+  z-index: 190;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 14px;
+  background: rgba(17,17,32,0.92);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 20px 46px rgba(0,0,0,0.5);
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-8px) scale(.98);
+  pointer-events: none;
+  transition: opacity .2s ease, transform .24s cubic-bezier(.22,1,.36,1);
+}
+#speedtest-panel.open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+#speedtest-panel-header {
+  height: 40px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding: 0 10px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(255,255,255,0.04);
+}
+#speedtest-panel-title {
+  font-family: 'Rajdhani',sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.85);
+}
+#speedtest-panel-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: transparent;
+  color: rgba(255,255,255,0.65);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .16s ease;
+}
+#speedtest-panel-close:hover {
+  color: #fff;
+  border-color: rgba(255,255,255,0.28);
+  background: rgba(255,255,255,0.08);
+}
+#speedtest-frame {
+  width: 100%;
+  height: calc(100% - 40px);
+  border: 0;
+  background: #07070e;
+}
 
 /* ─── Views ──────────────────────────────────────────────── */
 .view {
@@ -775,6 +840,27 @@ input[type="range"]::-webkit-slider-thumb {
 .field option { background:#111120; }
 .field-file { color:var(--muted); font-size:13px; font-family:'Rajdhani',sans-serif; }
 textarea.field { font-size:14px; }
+.file-picker-row {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin-top:2px;
+}
+.file-picker-btn {
+  padding:7px 14px;
+  font-size:12px;
+  letter-spacing:0.08em;
+}
+.file-picker-name {
+  font-family:'Rajdhani',sans-serif;
+  font-size:12px;
+  color:var(--muted);
+  letter-spacing:0.05em;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:250px;
+}
 
 /* Radio group */
 .radio-group { display:flex; flex-direction:column; gap:4px; }
@@ -1051,6 +1137,12 @@ textarea.field { font-size:14px; }
   #dials-container { padding:10px 8px 60px; }
   :root { --cols:2; }
   .panel-box { padding:20px 18px; min-width:unset; width:96vw; }
+  #speedtest-panel {
+    right: 8px;
+    left: 8px;
+    width: auto;
+    height: min(74vh, 520px);
+  }
 }
 
 @media (max-height: 600px) {
