@@ -10,9 +10,11 @@ const DEFAULT_STATE = () => ({
   ],
   activeGroup: 'home',
   settings: {
-    bgType: 'stars',
+    bgType: 'night',
     bgColor: '#07070e',
-    bgImage: null,
+    autoDayNight: false,
+    weatherEffect: 'clear',
+    autoWeather: false,
     overlayOp: 0.35,
     weatherCity: 'Dublin',
     tempUnit: 'celsius',
@@ -68,7 +70,9 @@ function getIconScale(value, fallback = 100) {
 }
 let ctxHideTimer = null;
 let starsAnimationFrame = null;
+let weatherAnimationFrame = null;
 let starsResizeTimer = null;
+let lastWeatherAtmosphere = null;
 const MODAL_CLOSE_MS = 280;
 const CLOCK_ANIM_MS = 420;
 const AUTO_BACKUP_DEBOUNCE_MS = 1800;
@@ -93,7 +97,6 @@ let pendingBackupSnapshot = null;
 let lastBackupFingerprint = '';
 let lastPromptFingerprint = '';
 let backupPromptVisible = false;
-let storageFallbackNoticeShown = false;
 
 // ─── Init ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -110,6 +113,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindAll();
   restorePlayer();
   restoreFocus();
+  setInterval(fetchWeather, 15 * 60 * 1000);
   document.addEventListener('visibilitychange', handleVisibilityChange);
   window.addEventListener('load', () => {
     requestAnimationFrame(() => requestAnimationFrame(updateTabsActivePill));
@@ -131,20 +135,6 @@ function saveState(options = {}) {
   chrome.storage.local.set({ ds2: s }, () => {
     if (!chrome.runtime.lastError) return;
     console.warn('DialSpace storage save failed:', chrome.runtime.lastError.message);
-    if (!s.settings?.bgImage) return;
-
-    // Fallback when custom wallpaper is too large for storage quota.
-    const fallback = JSON.parse(JSON.stringify(s));
-    fallback.settings.bgImage = null;
-    if (fallback.settings.bgType === 'image') fallback.settings.bgType = 'stars';
-    chrome.storage.local.set({ ds2: fallback }, () => {});
-    state.settings.bgImage = null;
-    if (state.settings.bgType === 'image') state.settings.bgType = 'stars';
-    applySettings();
-    if (!storageFallbackNoticeShown) {
-      storageFallbackNoticeShown = true;
-      alert('Custom background image is too large for browser storage. Please use a smaller image.');
-    }
   });
   if (scheduleBackup) scheduleBackupPrompt(s);
 }
@@ -162,6 +152,12 @@ function makeBackupFingerprintSource(snapshot) {
   const copy = buildExportableState(snapshot);
   delete copy.activeGroup;
   if (copy.player) delete copy.player.position;
+  if (copy.settings) {
+    delete copy.settings.bgType;
+    delete copy.settings.autoDayNight;
+    delete copy.settings.weatherEffect;
+    delete copy.settings.autoWeather;
+  }
   return copy;
 }
 
@@ -220,6 +216,9 @@ async function loadState() {
         state.groups = normalizeGroupsWithHome(saved.groups || state.groups);
         state.activeGroup = saved.activeGroup || state.groups[0].id;
         state.settings = { ...DEFAULT_STATE().settings, ...(saved.settings || {}) };
+        state.settings.bgType = normalizeBgType(state.settings.bgType);
+        state.settings.weatherEffect = normalizeWeatherEffect(state.settings.weatherEffect);
+        delete state.settings.bgImage;
         state.player = { ...DEFAULT_STATE().player, ...(saved.player || {}) };
         state.notes = saved.notes || '';
         if (!state.groups.some(g => g.id === state.activeGroup)) state.activeGroup = 'home';
@@ -262,6 +261,30 @@ function normalizeGroupsWithHome(groups) {
   return [homeGroup, ...regularGroups];
 }
 
+function normalizeBgType(value) {
+  if (value === 'stars' || value === 'image') return 'night';
+  if (['night', 'sunrise', 'day', 'sunset', 'solid'].includes(value)) return value;
+  return 'night';
+}
+
+function normalizeWeatherEffect(value) {
+  return ['clear', 'cloudy', 'rain', 'snow', 'fog'].includes(value) ? value : 'clear';
+}
+
+function getResolvedBgType() {
+  const autoPhase = state.settings.autoDayNight ? lastWeatherAtmosphere?.phase : null;
+  return normalizeBgType(autoPhase || state.settings.bgType);
+}
+
+function getResolvedWeatherEffect() {
+  const autoEffect = state.settings.autoWeather ? lastWeatherAtmosphere?.effect : null;
+  return normalizeWeatherEffect(autoEffect || state.settings.weatherEffect);
+}
+
+function backgroundUsesStars(bgType = getResolvedBgType()) {
+  return bgType === 'night' || bgType === 'sunset';
+}
+
 // ─── Apply settings to DOM ──────────────────────────────────
 function applySettings(initial) {
   const s = state.settings;
@@ -269,22 +292,26 @@ function applySettings(initial) {
 
   // Background
   const bgLayer = document.getElementById('bg-layer');
+  const weatherLayer = document.getElementById('weather-layer');
   const starsCanvas = document.getElementById('stars-canvas');
-  if (s.bgType === 'stars') {
-    bgLayer.style.backgroundImage = '';
-    bgLayer.style.background = '';
-    starsCanvas.style.display = 'block';
-  } else if (s.bgType === 'solid') {
+  const bgType = getResolvedBgType();
+  const weatherEffect = getResolvedWeatherEffect();
+  root.dataset.bg = bgType;
+  root.dataset.weather = weatherEffect;
+  if (bgType === 'solid') {
+    root.dataset.bg = 'solid';
+    bgLayer.className = '';
+    weatherLayer.className = '';
     bgLayer.style.background = s.bgColor;
     bgLayer.style.backgroundImage = '';
-    starsCanvas.style.display = 'none';
-  } else if (s.bgType === 'image' && s.bgImage) {
-    bgLayer.style.backgroundImage = `url(${s.bgImage})`;
-    bgLayer.style.backgroundSize = 'cover';
-    bgLayer.style.backgroundPosition = 'center';
+  } else {
+    bgLayer.className = `bg-${bgType}`;
+    weatherLayer.className = weatherEffect === 'clear' ? '' : `weather-${weatherEffect}`;
     bgLayer.style.background = '';
-    starsCanvas.style.display = 'none';
+    bgLayer.style.backgroundImage = '';
   }
+  starsCanvas.style.display = backgroundUsesStars(bgType) ? 'block' : 'none';
+  weatherLayer.style.display = weatherEffect === 'clear' || bgType === 'solid' ? 'none' : 'block';
 
   root.style.setProperty('--overlay-op', s.overlayOp);
   root.style.setProperty('--cols', s.cols);
@@ -321,6 +348,9 @@ function applySettings(initial) {
   // Notes content
   const notesArea = document.getElementById('notes-area');
   if (notesArea && initial) notesArea.value = state.notes || '';
+
+  if (backgroundUsesStars(bgType)) drawStars();
+  drawWeatherEffect(weatherEffect);
 }
 
 // ─── Stars ──────────────────────────────────────────────────
@@ -332,7 +362,7 @@ function drawStars() {
   }
   c.width = window.innerWidth;
   c.height = window.innerHeight;
-  if (state.settings.bgType !== 'stars') {
+  if (!backgroundUsesStars()) {
     c.style.display = 'none';
     return;
   }
@@ -353,8 +383,8 @@ function drawStars() {
       targetY,
       startX,
       startY,
-      radius: Math.random() * 1.3 + 0.15,
-      alpha: Math.random() * 0.75 + 0.08,
+      radius: Math.random() * 1.45 + 0.22,
+      alpha: Math.random() * 0.82 + 0.14,
       delay: Math.random() * 260,
       duration: 900 + Math.random() * 850,
       twinkleSpeed: 0.0008 + Math.random() * 0.0018,
@@ -371,7 +401,7 @@ function drawStars() {
   const startTime = performance.now();
 
   function render(now) {
-    if (state.settings.bgType !== 'stars') {
+    if (!backgroundUsesStars()) {
       ctx.clearRect(0, 0, c.width, c.height);
       starsAnimationFrame = null;
       return;
@@ -399,7 +429,7 @@ function drawStars() {
         const trailY = y - (star.targetY - star.startY) * 0.018;
         const grad = ctx.createLinearGradient(trailX - star.trail, trailY, x, y);
         grad.addColorStop(0, 'rgba(255,255,255,0)');
-        grad.addColorStop(1, `rgba(255,255,255,${opacity * 0.35})`);
+        grad.addColorStop(1, `rgba(235,245,255,${opacity * 0.46})`);
         ctx.beginPath();
         ctx.moveTo(trailX - star.trail, trailY);
         ctx.lineTo(x, y);
@@ -410,7 +440,7 @@ function drawStars() {
 
       ctx.beginPath();
       ctx.arc(x, y, star.radius, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255,255,255,${opacity})`;
+      ctx.fillStyle = `rgba(245,250,255,${Math.min(1, opacity * 1.12)})`;
       ctx.fill();
     }
 
@@ -466,6 +496,215 @@ function drawStars() {
   }
 
   starsAnimationFrame = requestAnimationFrame(render);
+}
+
+// ─── Weather atmosphere ─────────────────────────────────────
+function drawWeatherEffect(effect = getResolvedWeatherEffect()) {
+  const c = document.getElementById('weather-layer');
+  if (weatherAnimationFrame) {
+    cancelAnimationFrame(weatherAnimationFrame);
+    weatherAnimationFrame = null;
+  }
+  c.width = window.innerWidth;
+  c.height = window.innerHeight;
+  const mode = normalizeWeatherEffect(effect);
+  if (mode === 'clear' || getResolvedBgType() === 'solid') {
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+    c.style.display = 'none';
+    return;
+  }
+  c.style.display = 'block';
+  const ctx = c.getContext('2d');
+  const rand = (min, max) => min + Math.random() * (max - min);
+  const bgType = getResolvedBgType();
+  const brightClouds = mode === 'cloudy' && (bgType === 'day' || bgType === 'sunrise');
+  const cloudBoost = brightClouds ? 1.75 : 1;
+  let particles;
+  let lastTime = performance.now();
+
+  if (mode === 'rain') {
+    const count = Math.min(420, Math.max(180, Math.round((c.width * c.height) / 5200)));
+    particles = Array.from({ length: count }, () => makeRainDrop(c, rand, true));
+  } else if (mode === 'snow') {
+    const count = Math.min(240, Math.max(90, Math.round((c.width * c.height) / 9800)));
+    particles = Array.from({ length: count }, () => makeSnowFlake(c, rand, true));
+  } else if (mode === 'fog') {
+    const count = Math.min(34, Math.max(18, Math.round(c.width / 64)));
+    particles = Array.from({ length: count }, () => makeFogWisp(c, rand, true));
+  } else {
+    const count = Math.round(Math.min(34, Math.max(14, Math.round(c.width / 92))) * cloudBoost);
+    particles = Array.from({ length: count }, () => makeCloudWisp(c, rand, true, cloudBoost));
+  }
+
+  function render(now) {
+    if (normalizeWeatherEffect(getResolvedWeatherEffect()) !== mode || getResolvedBgType() === 'solid') {
+      ctx.clearRect(0, 0, c.width, c.height);
+      weatherAnimationFrame = null;
+      return;
+    }
+    const dt = Math.min(2, Math.max(0.45, (now - lastTime) / 16.67));
+    lastTime = now;
+    ctx.clearRect(0, 0, c.width, c.height);
+
+    if (mode === 'rain') {
+      ctx.lineCap = 'round';
+      for (const drop of particles) {
+        drop.x += (drop.wind + Math.sin(now * drop.wobbleSpeed + drop.phase) * drop.wobble) * dt;
+        drop.y += drop.speed * dt;
+        if (drop.y - drop.len > c.height || drop.x > c.width + 120) Object.assign(drop, makeRainDrop(c, rand, false));
+        const alpha = drop.alpha * (0.78 + Math.sin(now * 0.0017 + drop.phase) * 0.16);
+        ctx.strokeStyle = `rgba(190,220,255,${alpha})`;
+        ctx.lineWidth = drop.width;
+        ctx.beginPath();
+        ctx.moveTo(drop.x, drop.y);
+        ctx.lineTo(drop.x - drop.slant, drop.y - drop.len);
+        ctx.stroke();
+      }
+    } else if (mode === 'snow') {
+      for (const flake of particles) {
+        flake.y += flake.speed * dt;
+        flake.x += (flake.wind + Math.sin(now * flake.swaySpeed + flake.phase) * flake.sway) * dt;
+        flake.spin += flake.spinSpeed * dt;
+        if (flake.y - flake.size > c.height || flake.x < -80 || flake.x > c.width + 80) Object.assign(flake, makeSnowFlake(c, rand, false));
+        const alpha = flake.alpha * (0.84 + Math.sin(now * 0.0012 + flake.phase) * 0.16);
+        ctx.fillStyle = `rgba(245,250,255,${alpha})`;
+        ctx.beginPath();
+        ctx.ellipse(flake.x, flake.y, flake.size * (1 + Math.sin(flake.spin) * 0.18), flake.size, flake.spin, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (mode === 'fog') {
+      ctx.globalCompositeOperation = 'screen';
+      for (const wisp of particles) {
+        wisp.x += (wisp.speed + Math.sin(now * wisp.swaySpeed + wisp.phase) * wisp.sway) * dt;
+        wisp.y += Math.cos(now * wisp.swaySpeed * 0.7 + wisp.phase) * wisp.lift * dt;
+        if (wisp.x - wisp.rx > c.width + 140) Object.assign(wisp, makeFogWisp(c, rand, false));
+        ctx.save();
+        ctx.translate(wisp.x, wisp.y);
+        ctx.rotate(wisp.rot);
+        ctx.scale(1, wisp.ry / wisp.rx);
+        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, wisp.rx);
+        grad.addColorStop(0, `rgba(230,238,245,${wisp.alpha})`);
+        grad.addColorStop(0.48, `rgba(210,224,236,${wisp.alpha * 0.45})`);
+        grad.addColorStop(1, 'rgba(210,224,236,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, wisp.rx, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+      for (const cloud of particles) {
+        cloud.x += (cloud.speed + Math.sin(now * cloud.swaySpeed + cloud.phase) * cloud.sway) * dt;
+        cloud.y += Math.cos(now * cloud.swaySpeed * 0.55 + cloud.phase) * cloud.lift * dt;
+        if (cloud.x - cloud.rx > c.width + 180) Object.assign(cloud, makeCloudWisp(c, rand, false, cloudBoost));
+        ctx.save();
+        ctx.translate(cloud.x, cloud.y);
+        ctx.rotate(cloud.rot);
+        ctx.scale(1, cloud.ry / cloud.rx);
+        const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, cloud.rx);
+        if (brightClouds) {
+          shadow.addColorStop(0, `rgba(78,96,120,${cloud.alpha * 0.9})`);
+          shadow.addColorStop(0.42, `rgba(96,116,140,${cloud.alpha * 0.58})`);
+          shadow.addColorStop(0.78, `rgba(126,146,168,${cloud.alpha * 0.2})`);
+          shadow.addColorStop(1, 'rgba(126,146,168,0)');
+        } else {
+          shadow.addColorStop(0, `rgba(245,248,252,${cloud.alpha})`);
+          shadow.addColorStop(0.34, `rgba(220,232,242,${cloud.alpha * 0.72})`);
+          shadow.addColorStop(0.72, `rgba(168,188,210,${cloud.alpha * 0.24})`);
+          shadow.addColorStop(1, 'rgba(168,188,210,0)');
+        }
+        ctx.fillStyle = shadow;
+        ctx.beginPath();
+        ctx.arc(0, 0, cloud.rx, 0, Math.PI * 2);
+        ctx.fill();
+        if (brightClouds) {
+          const highlight = ctx.createRadialGradient(-cloud.rx * 0.18, -cloud.rx * 0.08, 0, -cloud.rx * 0.18, -cloud.rx * 0.08, cloud.rx * 0.74);
+          highlight.addColorStop(0, `rgba(255,255,255,${cloud.alpha * 0.72})`);
+          highlight.addColorStop(0.44, `rgba(245,250,255,${cloud.alpha * 0.32})`);
+          highlight.addColorStop(1, 'rgba(245,250,255,0)');
+          ctx.fillStyle = highlight;
+          ctx.beginPath();
+          ctx.arc(0, 0, cloud.rx * 0.82, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = brightClouds ? 'rgba(62,82,108,0.16)' : 'rgba(70,85,105,0.08)';
+      ctx.fillRect(0, 0, c.width, c.height);
+    }
+
+    weatherAnimationFrame = requestAnimationFrame(render);
+  }
+
+  weatherAnimationFrame = requestAnimationFrame(render);
+}
+
+function makeRainDrop(c, rand, initial) {
+  return {
+    x: rand(-80, c.width + 80),
+    y: initial ? rand(-c.height, c.height) : rand(-180, -20),
+    len: rand(18, 62),
+    speed: rand(13, 28),
+    slant: rand(7, 22),
+    wind: rand(0.8, 4.8),
+    width: rand(0.55, 1.65),
+    alpha: rand(0.14, 0.38),
+    wobble: rand(0.05, 0.55),
+    wobbleSpeed: rand(0.001, 0.004),
+    phase: Math.random() * Math.PI * 2
+  };
+}
+
+function makeSnowFlake(c, rand, initial) {
+  return {
+    x: rand(-40, c.width + 40),
+    y: initial ? rand(-c.height, c.height) : rand(-90, -8),
+    size: rand(0.8, 3.4),
+    speed: rand(0.45, 2.2),
+    wind: rand(-0.45, 1.1),
+    sway: rand(0.35, 1.9),
+    swaySpeed: rand(0.0012, 0.0045),
+    spin: rand(0, Math.PI * 2),
+    spinSpeed: rand(-0.035, 0.035),
+    alpha: rand(0.32, 0.82),
+    phase: Math.random() * Math.PI * 2
+  };
+}
+
+function makeFogWisp(c, rand, initial) {
+  return {
+    x: initial ? rand(-c.width * 0.2, c.width * 1.05) : rand(-240, -60),
+    y: rand(c.height * 0.12, c.height * 0.92),
+    rx: rand(150, 420),
+    ry: rand(42, 150),
+    speed: rand(0.05, 0.32),
+    sway: rand(0.03, 0.22),
+    swaySpeed: rand(0.00018, 0.00065),
+    lift: rand(0.02, 0.16),
+    rot: rand(-0.18, 0.18),
+    alpha: rand(0.025, 0.09),
+    phase: Math.random() * Math.PI * 2
+  };
+}
+
+function makeCloudWisp(c, rand, initial, boost = 1) {
+  return {
+    x: initial ? rand(-c.width * 0.25, c.width * 1.08) : rand(-320, -100),
+    y: rand(c.height * 0.03, c.height * (boost > 1 ? 0.56 : 0.46)),
+    rx: rand(190, 560),
+    ry: rand(52, 150),
+    speed: rand(0.06, 0.26),
+    sway: rand(0.02, 0.16),
+    swaySpeed: rand(0.00012, 0.00046),
+    lift: rand(0.015, 0.1),
+    rot: rand(-0.12, 0.1),
+    alpha: rand(0.09, 0.21) * boost,
+    phase: Math.random() * Math.PI * 2
+  };
 }
 
 // ─── Clock ──────────────────────────────────────────────────
@@ -560,7 +799,7 @@ function updateClock() {
 
 // ─── Weather ────────────────────────────────────────────────
 async function fetchWeather() {
-  if (!state.settings.showWeather) return;
+  if (!state.settings.showWeather && !state.settings.autoDayNight && !state.settings.autoWeather) return;
   const city = state.settings.weatherCity || 'Dublin';
   try {
     const geo = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`);
@@ -570,22 +809,77 @@ async function fetchWeather() {
     const unit = state.settings.tempUnit === 'fahrenheit' ? 'fahrenheit' : 'celsius';
     const forecastDays = state.settings.showWeatherForecast ? normalizeForecastDays(state.settings.weatherForecastDays) : 1;
     const dailyParams = state.settings.showWeatherForecast
-      ? '&daily=weather_code,temperature_2m_max,temperature_2m_min'
-      : '';
-    const wx = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weathercode,is_day&temperature_unit=${unit}&forecast_days=${forecastDays}${dailyParams}`);
+      ? 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset'
+      : 'sunrise,sunset';
+    const currentParams = 'temperature_2m,weather_code,is_day,precipitation,rain,snowfall,cloud_cover,relative_humidity_2m,visibility';
+    const wx = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=${currentParams}&daily=${dailyParams}&temperature_unit=${unit}&forecast_days=${forecastDays}&timezone=auto`);
     const wd = await wx.json();
     const temp = Math.round(wd.current.temperature_2m);
-    const code = wd.current.weathercode;
+    const code = Number(wd.current.weather_code ?? wd.current.weathercode ?? 0);
     const isNight = Number(wd.current?.is_day) === 0;
-    document.getElementById('weather-city').textContent = `${name.toUpperCase()}, ${country.toUpperCase()}`;
-    document.getElementById('weather-desc').textContent = wmoDesc(code) + '  ' + temp + (unit === 'fahrenheit' ? '°F' : '°C');
-    document.getElementById('weather-icon').className = `${wmoIcon(code)}${isNight ? ' night' : ''}`.trim();
-    renderWeatherForecast(wd.daily, unit);
+    updateAtmosphereFromWeather(wd);
+    if (state.settings.showWeather) {
+      document.getElementById('weather-city').textContent = `${name.toUpperCase()}, ${country.toUpperCase()}`;
+      document.getElementById('weather-desc').textContent = wmoDesc(code) + '  ' + temp + (unit === 'fahrenheit' ? '°F' : '°C');
+      document.getElementById('weather-icon').className = `${wmoIcon(code)}${isNight ? ' night' : ''}`.trim();
+      renderWeatherForecast(wd.daily, unit);
+    }
   } catch(e) {
+    lastWeatherAtmosphere = null;
+    applySettings();
     document.getElementById('weather-city').textContent = city.toUpperCase();
     document.getElementById('weather-desc').textContent = 'UNAVAILABLE';
     document.getElementById('weather-forecast').innerHTML = '';
   }
+}
+
+function updateAtmosphereFromWeather(data) {
+  const phase = state.settings.autoDayNight ? getDayPhase(data) : null;
+  const effect = state.settings.autoWeather ? getWeatherEffect(data.current || {}) : null;
+  lastWeatherAtmosphere = { phase, effect };
+  applySettings();
+}
+
+function getDayPhase(data) {
+  const currentTime = new Date(data.current?.time || Date.now()).getTime();
+  const sunrise = new Date(data.daily?.sunrise?.[0] || '').getTime();
+  const sunset = new Date(data.daily?.sunset?.[0] || '').getTime();
+  if (!Number.isFinite(currentTime) || !Number.isFinite(sunrise) || !Number.isFinite(sunset)) {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 8) return 'sunrise';
+    if (hour >= 8 && hour < 18) return 'day';
+    if (hour >= 18 && hour < 21) return 'sunset';
+    return 'night';
+  }
+  const halfHour = 30 * 60 * 1000;
+  const oneHour = 60 * 60 * 1000;
+  if (currentTime >= sunrise - halfHour && currentTime <= sunrise + oneHour) return 'sunrise';
+  if (currentTime >= sunset - oneHour && currentTime <= sunset + halfHour) return 'sunset';
+  if (currentTime > sunrise && currentTime < sunset) return 'day';
+  return 'night';
+}
+
+function getWeatherEffect(current) {
+  const code = Number(current.weather_code ?? current.weathercode ?? 0);
+  const precipitation = Number(current.precipitation || 0);
+  const rain = Number(current.rain || 0);
+  const snow = Number(current.snowfall || 0);
+  const visibility = Number(current.visibility || 0);
+  const clouds = Number(current.cloud_cover || 0);
+  const humidity = Number(current.relative_humidity_2m || 0);
+  if (isMeteoSnowCode(code) || snow >= 0.1) return 'snow';
+  if (rain >= 0.5 || precipitation >= 0.5 || isMeteoHeavyRainCode(code)) return 'rain';
+  if (code === 45 || code === 48 || (visibility > 0 && visibility < 5000) || (clouds >= 90 && humidity >= 88)) return 'fog';
+  if ((code >= 1 && code <= 3) || clouds >= 58) return 'cloudy';
+  return 'clear';
+}
+
+function isMeteoSnowCode(code) {
+  return (code >= 71 && code <= 77) || code === 85 || code === 86;
+}
+
+function isMeteoHeavyRainCode(code) {
+  return code === 65 || code === 67 || code === 81 || code === 82 || code >= 95;
 }
 
 function setPickedFileName(labelEl, file) {
@@ -1198,6 +1492,9 @@ function importNativeBackup(imported) {
   state.groups = normalizeGroupsWithHome(imported.groups);
   state.activeGroup = imported.activeGroup || state.groups[0]?.id;
   state.settings = { ...DEFAULT_STATE().settings, ...(imported.settings || {}) };
+  state.settings.bgType = normalizeBgType(state.settings.bgType);
+  state.settings.weatherEffect = normalizeWeatherEffect(state.settings.weatherEffect);
+  delete state.settings.bgImage;
   state.player = { ...DEFAULT_STATE().player, ...(imported.player || {}) };
   state.notes = imported.notes || '';
   if (!state.groups.some(g => g.id === state.activeGroup)) state.activeGroup = 'home';
@@ -1282,13 +1579,15 @@ function deleteTab() {
 // ─── Settings Modal ──────────────────────────────────────────
 function openSettings(triggerEl) {
   const s = state.settings;
-  document.querySelector(`input[name="bg-type"][value="${s.bgType}"]`).checked = true;
+  s.bgType = normalizeBgType(s.bgType);
+  s.weatherEffect = normalizeWeatherEffect(s.weatherEffect);
+  const bgRadio = document.querySelector(`input[name="bg-type"][value="${s.bgType}"]`);
+  if (bgRadio) bgRadio.checked = true;
   document.getElementById('bg-color-inp').value = s.bgColor;
   document.getElementById('s-bg-color').style.display = s.bgType === 'solid' ? 'block' : 'none';
-  document.getElementById('s-bg-image').style.display = s.bgType === 'image' ? 'block' : 'none';
-  if (s.bgImage) { const p = document.getElementById('bg-img-preview'); p.src = s.bgImage; p.style.display = 'block'; }
-  document.getElementById('bg-img-file').value = '';
-  document.getElementById('bg-img-file-name').textContent = s.bgImage ? 'Current image' : 'No file selected';
+  document.getElementById('s-auto-daynight').checked = !!s.autoDayNight;
+  document.getElementById('s-weather-effect').value = s.weatherEffect;
+  document.getElementById('s-auto-weather').checked = !!s.autoWeather;
   document.getElementById('overlay-opacity').value = s.overlayOp;
   document.getElementById('overlay-val').textContent = s.overlayOp;
   document.getElementById('s-cols').value = s.cols;
@@ -1323,8 +1622,11 @@ function closeSettings() { closeOverlay('modal-settings'); }
 
 async function saveSettings() {
   const s = state.settings;
-  s.bgType = document.querySelector('input[name="bg-type"]:checked').value;
+  s.bgType = normalizeBgType(document.querySelector('input[name="bg-type"]:checked').value);
   s.bgColor = document.getElementById('bg-color-inp').value;
+  s.autoDayNight = document.getElementById('s-auto-daynight').checked;
+  s.weatherEffect = normalizeWeatherEffect(document.getElementById('s-weather-effect').value);
+  s.autoWeather = document.getElementById('s-auto-weather').checked;
   s.overlayOp = parseFloat(document.getElementById('overlay-opacity').value);
   s.cols = parseInt(document.getElementById('s-cols').value);
   s.dialShape = document.getElementById('s-shape').value;
@@ -1353,72 +1655,11 @@ async function saveSettings() {
   s.shuffleOnStart = document.getElementById('s-shuffle-start').checked;
   s.blockedDomains = document.getElementById('s-blocked-domains').value;
 
-  // BG image — with canvas optimization for large files
-  const bgFile = document.getElementById('bg-img-file').files[0];
-  if (bgFile) {
-    const raw = await fileToB64(bgFile);
-    s.bgImage = await optimizeImage(raw, 1400, 420 * 1024);
-    s.bgType = 'image';
-  }
-  if (s.bgType !== 'image') s.bgImage = null;
-
   saveState();
   applySettings();
   renderDials();
   fetchWeather();
-  if (s.bgType === 'stars') drawStars();
   closeSettings();
-}
-
-// ─── Image optimization ──────────────────────────────────────
-function dataUrlBytes(dataUrl) {
-  if (typeof dataUrl !== 'string') return Infinity;
-  const base64 = dataUrl.split(',')[1];
-  if (!base64) return Infinity;
-  const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
-  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
-}
-
-function optimizeImage(dataUrl, maxW, maxBytes = 420 * 1024) {
-  return new Promise(resolve => {
-    const img = new Image();
-    img.onload = () => {
-      let targetWidth = Math.min(img.width, maxW);
-      let best = dataUrl;
-
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const scale = targetWidth / img.width;
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(targetWidth));
-        canvas.height = Math.max(1, Math.round(img.height * scale));
-        const ctx = canvas.getContext('2d');
-        if (!ctx) break;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        const candidates = [
-          canvas.toDataURL('image/webp', 0.82),
-          canvas.toDataURL('image/webp', 0.72),
-          canvas.toDataURL('image/webp', 0.62),
-          canvas.toDataURL('image/jpeg', 0.82),
-          canvas.toDataURL('image/jpeg', 0.72),
-          canvas.toDataURL('image/jpeg', 0.62)
-        ].filter(v => typeof v === 'string' && v.startsWith('data:image'));
-
-        for (const candidate of candidates) {
-          const bytes = dataUrlBytes(candidate);
-          if (bytes < dataUrlBytes(best)) best = candidate;
-          if (bytes <= maxBytes) {
-            resolve(candidate);
-            return;
-          }
-        }
-        targetWidth *= 0.75;
-      }
-      resolve(best);
-    };
-    img.onerror = () => resolve(dataUrl);
-    img.src = dataUrl;
-  });
 }
 
 function openSpeedTestPanel() {
@@ -1534,7 +1775,6 @@ function doReset() {
 // ─── Cloud Sync ───────────────────────────────────────────────
 function cloudSerialize() {
   const s = JSON.parse(JSON.stringify(state));
-  s.settings.bgImage = null;
   s.player.playlist = s.player.playlist.filter(t => t.type === 'url');
   s.groups = s.groups.map(group => ({
     id: group.id,
@@ -2433,20 +2673,10 @@ function bindAll() {
 
   document.querySelectorAll('input[name="bg-type"]').forEach(r => r.addEventListener('change', () => {
     document.getElementById('s-bg-color').style.display = r.value === 'solid' && r.checked ? 'block' : 'none';
-    document.getElementById('s-bg-image').style.display = r.value === 'image' && r.checked ? 'block' : 'none';
+    if (r.checked) document.getElementById('s-auto-daynight').checked = false;
   }));
-  document.getElementById('bg-img-file-btn').addEventListener('click', () => {
-    document.getElementById('bg-img-file').click();
-  });
-  document.getElementById('bg-img-file').addEventListener('change', async e => {
-    const f = e.target.files[0]; if (!f) return;
-    const bgImageRadio = document.querySelector('input[name="bg-type"][value="image"]');
-    if (bgImageRadio) bgImageRadio.checked = true;
-    document.getElementById('s-bg-color').style.display = 'none';
-    document.getElementById('s-bg-image').style.display = 'block';
-    setPickedFileName(document.getElementById('bg-img-file-name'), f);
-    const b = await fileToB64(f);
-    const p = document.getElementById('bg-img-preview'); p.src = b; p.style.display = 'block';
+  document.getElementById('s-weather-effect').addEventListener('change', () => {
+    document.getElementById('s-auto-weather').checked = false;
   });
   document.getElementById('overlay-opacity').addEventListener('input', e => {
     document.getElementById('overlay-val').textContent = parseFloat(e.target.value).toFixed(2);
@@ -2653,7 +2883,8 @@ function bindAll() {
   window.addEventListener('resize', () => {
     clearTimeout(starsResizeTimer);
     starsResizeTimer = setTimeout(() => {
-      if (state.settings.bgType === 'stars') drawStars();
+      if (backgroundUsesStars()) drawStars();
+      drawWeatherEffect();
     }, 120);
   });
   document.getElementById('tabs-scroll').addEventListener('scroll', updateTabsActivePill, { passive: true });

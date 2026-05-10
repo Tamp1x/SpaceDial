@@ -12,6 +12,7 @@
 
 <canvas id="stars-canvas"></canvas>
 <div id="bg-layer"></div>
+<canvas id="weather-layer"></canvas>
 <div id="bg-overlay"></div>
 
 <div id="tab-bar">
@@ -247,18 +248,26 @@
         <div class="s-section-title">Appearance</div>
         <label class="field-label">Wallpaper</label>
         <div class="radio-group">
-          <label class="rl"><input type="radio" name="bg-type" value="stars" checked> Stars</label>
+          <label class="rl"><input type="radio" name="bg-type" value="night" checked> Night</label>
+          <label class="rl"><input type="radio" name="bg-type" value="sunrise"> Sunrise</label>
+          <label class="rl"><input type="radio" name="bg-type" value="day"> Day</label>
+          <label class="rl"><input type="radio" name="bg-type" value="sunset"> Sunset</label>
           <label class="rl"><input type="radio" name="bg-type" value="solid"> Solid color</label>
-          <label class="rl"><input type="radio" name="bg-type" value="image"> Custom image (PNG/JPG)</label>
         </div>
         <div id="s-bg-color" style="display:none;margin-top:8px"><input type="color" id="bg-color-inp" value="#07070e"></div>
-        <div id="s-bg-image" style="display:none;margin-top:8px">
-          <input type="file" id="bg-img-file" accept="image/png,image/jpeg,image/webp,image/gif,image/*" class="field-file" style="display:none">
-          <div class="file-picker-row">
-            <button type="button" class="btn-secondary file-picker-btn" id="bg-img-file-btn">Choose image</button>
-            <span class="file-picker-name" id="bg-img-file-name">No file selected</span>
-          </div>
-          <img id="bg-img-preview" src="" alt="" style="display:none;max-height:80px;border-radius:8px;margin-top:6px">
+        <div class="toggle-row" style="margin-top:12px">
+          <span>Auto day/night</span><label class="toggle"><input type="checkbox" id="s-auto-daynight"><span class="tog-slider"></span></label>
+        </div>
+        <label class="field-label" style="margin-top:12px">Weather effect</label>
+        <select id="s-weather-effect" class="field">
+          <option value="clear" selected>Clear</option>
+          <option value="cloudy">Cloudy</option>
+          <option value="rain">Rain</option>
+          <option value="snow">Snow</option>
+          <option value="fog">Fog</option>
+        </select>
+        <div class="toggle-row" style="margin-top:12px">
+          <span>Auto weather</span><label class="toggle"><input type="checkbox" id="s-auto-weather"><span class="tog-slider"></span></label>
         </div>
         <label class="field-label" style="margin-top:14px">Overlay opacity <span id="overlay-val" style="color:var(--text);font-variant-numeric:tabular-nums">0.35</span></label>
         <input type="range" id="overlay-opacity" min="0" max="0.9" step="0.05" value="0.35" class="slider">
@@ -366,7 +375,7 @@
 <div id="modal-ie" class="overlay-panel" style="display:none">
   <div class="panel-box small-box">
     <div class="panel-title">Backup &amp; Sync</div>
-    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">Wallpaper images and local audio files are excluded from cloud sync due to size.</p>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">Local audio files are excluded from cloud sync due to size.</p>
     <div class="ie-section-title">Local backup</div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
       <button class="btn-primary" id="ie-export-min">⬇ Export minimal .json</button>

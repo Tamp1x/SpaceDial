@@ -38,8 +38,10 @@ DialSpace replaces your browser's new tab page with a fully-featured, space-them
 - Session persists across browser restarts via `session` storage
 
 ### Appearance
-- Animated starfield background (canvas-based, low CPU)
-- Optional solid colour or custom image background with overlay opacity control
+- Animated Night background plus Sunrise, Day, and Sunset atmosphere modes
+- Optional automatic day/night switching via Open-Meteo sunrise/sunset data
+- Manual or automatic weather effects: clouds, rain, snow, and fog
+- Optional solid colour background with overlay opacity control
 - Glassmorphism card style (toggleable)
 - Adjustable column count and dial icon scale
 - Border visibility toggle
@@ -111,7 +113,10 @@ All settings live in **Settings → Appearance / Behaviour / Focus** inside the 
 
 | Setting | Default | Description |
 |---|---|---|
-| Background type | Stars | `stars`, `color`, or `image` |
+| Background type | Night | `night`, `sunrise`, `day`, `sunset`, or `solid` |
+| Auto day/night | Off | Uses Open-Meteo sunrise/sunset data to switch between Sunrise, Day, Sunset, and Night |
+| Weather effect | Clear | `clear`, `cloudy`, `rain`, `snow`, or `fog` |
+| Auto weather | Off | Uses Open-Meteo current weather data to switch weather effects |
 | Columns | 5 | Number of dial columns |
 | Dial shape | Wide | `wide` or `square` |
 | Clock format | 24h | 12h or 24h |
