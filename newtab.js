@@ -74,7 +74,9 @@ const DEFAULT_STATE = () => ({
     volume: 1,
     position: 0
   },
-  lastWeatherAtmosphere: null
+  lastWeatherAtmosphere: null,
+  lastUpdateCheck: 0,
+  ignoredUpdate: null
 });
 
 let state = DEFAULT_STATE();
@@ -144,6 +146,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.fonts?.ready?.then(() => {
     requestAnimationFrame(() => requestAnimationFrame(updateTabsActivePill));
   });
+  checkForUpdates();
 });
 
 // ─── Persistence ────────────────────────────────────────────
@@ -245,6 +248,8 @@ async function loadState() {
         delete state.settings.bgImage;
         state.player = { ...DEFAULT_STATE().player, ...(saved.player || {}) };
         state.notes = saved.notes || ''; if (saved.lastWeatherAtmosphere !== undefined) { state.lastWeatherAtmosphere = saved.lastWeatherAtmosphere; lastWeatherAtmosphere = saved.lastWeatherAtmosphere; }
+        if (saved.lastUpdateCheck !== undefined) state.lastUpdateCheck = saved.lastUpdateCheck;
+        if (saved.ignoredUpdate !== undefined) state.ignoredUpdate = saved.ignoredUpdate;
         if (!state.groups.some(g => g.id === state.activeGroup)) state.activeGroup = 'home';
       }
       res();
@@ -2347,6 +2352,109 @@ let playlist = [];
 let currentIdx = 0;
 let shuffleQueue = [];
 
+// BroadcastChannel Music Sync
+const musicChannel = new BroadcastChannel('ds2_music');
+let isMusicLeader = false;
+let leaderLastHeartbeat = Date.now();
+let slaveSyncState = { playing: false, idx: 0, time: 0, duration: 0 };
+let startupPingTimer = null;
+
+function getSyncPlaylist() {
+  return playlist.map(t => ({
+    name: t.name, artist: t.artist, type: t.type, src: t.type === 'url' ? t.src : null, file: t.file || null
+  }));
+}
+
+function updatePlaylistFromSync(syncList) {
+  playlist = syncList.map(t => {
+    if (t.type === 'file' && t.file) {
+      return { ...t, src: URL.createObjectURL(t.file) };
+    }
+    return t;
+  });
+  updatePlayerList();
+}
+
+musicChannel.onmessage = (e) => {
+  const msg = e.data;
+  if (msg.type === 'PING') {
+    if (isMusicLeader) musicChannel.postMessage({ type: 'PONG', state: getPlayerState(), playlist: getSyncPlaylist() });
+  } else if (msg.type === 'PONG') {
+    if (startupPingTimer) { clearTimeout(startupPingTimer); startupPingTimer = null; }
+    isMusicLeader = false;
+    leaderLastHeartbeat = Date.now();
+    if (msg.playlist) updatePlaylistFromSync(msg.playlist);
+    syncUiFromLeader(msg.state);
+  } else if (msg.type === 'PLAYLIST_UPDATE') {
+    if (!isMusicLeader) updatePlaylistFromSync(msg.playlist);
+  } else if (msg.type === 'LEADER_DYING') {
+    setTimeout(() => {
+      if (!isMusicLeader && Date.now() - leaderLastHeartbeat > 150) {
+        becomeLeader(slaveSyncState);
+      }
+    }, Math.random() * 80);
+  } else if (msg.type === 'CLAIM_LEADER') {
+    if (startupPingTimer) { clearTimeout(startupPingTimer); startupPingTimer = null; }
+    isMusicLeader = false;
+    leaderLastHeartbeat = Date.now();
+  } else if (msg.type === 'TIME_UPDATE') {
+    if (!isMusicLeader) syncUiFromLeader(msg.state);
+  } else if (isMusicLeader) {
+    if (msg.type === 'CMD_PLAY') audio.play().catch(()=>{});
+    if (msg.type === 'CMD_PAUSE') audio.pause();
+    if (msg.type === 'CMD_TOGGLE') togglePlay();
+    if (msg.type === 'CMD_NEXT') nextTrack(msg.forcePlay);
+    if (msg.type === 'CMD_PREV') prevTrack();
+    if (msg.type === 'CMD_SEEK') { audio.currentTime = msg.time; }
+    if (msg.type === 'CMD_VOL') { audio.volume = msg.vol; state.player.volume = msg.vol; document.getElementById('player-vol').value = msg.vol; saveState({ scheduleBackup: false }); }
+    if (msg.type === 'CMD_LOAD') { loadTrack(msg.idx, msg.autoplay, true); }
+  }
+};
+
+window.addEventListener('pagehide', () => {
+  if (isMusicLeader) musicChannel.postMessage({ type: 'LEADER_DYING' });
+});
+
+function getPlayerState() {
+  return { playing: !audio.paused, idx: currentIdx, time: audio.currentTime, duration: audio.duration };
+}
+
+function syncUiFromLeader(st) {
+  slaveSyncState = st;
+  document.getElementById('player-seek').value = st.duration ? (st.time / st.duration) * 100 : 0;
+  document.getElementById('player-current').textContent = fmtTime(st.time);
+  document.getElementById('player-duration').textContent = fmtTime(st.duration);
+  setPlayIcon(st.playing);
+  currentIdx = st.idx;
+  const t = playlist[currentIdx];
+  if (t) {
+    document.getElementById('player-title').textContent = t.name || 'Unknown';
+    document.getElementById('player-artist').textContent = t.artist || '';
+  }
+}
+
+function becomeLeader(st) {
+  isMusicLeader = true;
+  musicChannel.postMessage({ type: 'CLAIM_LEADER' });
+  if (playlist.length && playlist[st.idx]) {
+    audio.src = playlist[st.idx].src;
+    audio.currentTime = st.time || 0;
+    if (st.playing) audio.play().catch(()=>{});
+  }
+}
+
+// On init, try to find a leader
+setTimeout(() => {
+  musicChannel.postMessage({ type: 'PING' });
+  startupPingTimer = setTimeout(() => {
+    isMusicLeader = true;
+    musicChannel.postMessage({ type: 'CLAIM_LEADER' });
+    if (playlist.length) {
+      loadTrack(currentIdx, state.settings.autoplay, false);
+    }
+  }, 150);
+}, 50);
+
 function resetShuffleQueue() {
   shuffleQueue = [];
 }
@@ -2378,12 +2486,15 @@ function restorePlayer() {
   document.getElementById('btn-repeat').classList.toggle('on', state.player.repeat);
   if (playlist.length) {
     loadTrack(currentIdx, false, false);
-    if (state.settings.autoplay) audio.play().catch(() => {});
   }
 }
 
 function loadTrack(idx, autoplay, persist = true) {
   if (!playlist.length) return;
+  if (!isMusicLeader) {
+    musicChannel.postMessage({ type: 'CMD_LOAD', idx, autoplay });
+    return;
+  }
   idx = ((idx % playlist.length) + playlist.length) % playlist.length;
   currentIdx = idx;
   shuffleQueue = shuffleQueue.filter(queueIdx => queueIdx !== idx);
@@ -2398,7 +2509,7 @@ function loadTrack(idx, autoplay, persist = true) {
   setPlayIcon(false);
   if (autoplay) audio.play().catch(() => {});
   state.player.currentIdx = idx;
-  if (persist) saveState();
+  if (persist) saveState({ scheduleBackup: false });
 }
 
 function setPlayIcon(playing) {
@@ -2407,6 +2518,7 @@ function setPlayIcon(playing) {
 }
 
 function togglePlay() {
+  if (!isMusicLeader) { musicChannel.postMessage({ type: 'CMD_TOGGLE' }); return; }
   if (audio.paused) {
     if (!audio.src && playlist.length) loadTrack(0, true);
     else audio.play().catch(() => {});
@@ -2414,6 +2526,7 @@ function togglePlay() {
 }
 
 function nextTrack(forcePlay = false) {
+  if (!isMusicLeader) { musicChannel.postMessage({ type: 'CMD_NEXT', forcePlay }); return; }
   if (!playlist.length) return;
   const shouldAutoplay = forcePlay || !audio.paused;
 
@@ -2430,6 +2543,7 @@ function nextTrack(forcePlay = false) {
 }
 
 function prevTrack() {
+  if (!isMusicLeader) { musicChannel.postMessage({ type: 'CMD_PREV' }); return; }
   if (audio.currentTime > 3) { audio.currentTime = 0; return; }
   loadTrack(currentIdx - 1, !audio.paused);
 }
@@ -2450,7 +2564,7 @@ function resetPlayerUi() {
 }
 
 function unloadAllTracks() {
-  audio.pause();
+  if (isMusicLeader) audio.pause();
   playlist.forEach(track => {
     if (track?.type === 'file' && track.src) URL.revokeObjectURL(track.src);
   });
@@ -2460,13 +2574,16 @@ function unloadAllTracks() {
   state.player.playlist = [];
   state.player.currentIdx = 0;
   state.player.position = 0;
-  audio.removeAttribute('src');
-  audio.load();
+  if (isMusicLeader) {
+    audio.removeAttribute('src');
+    audio.load();
+    musicChannel.postMessage({ type: 'PLAYLIST_UPDATE', playlist: [] });
+  }
   resetPlayerUi();
   document.getElementById('file-input').value = '';
   document.getElementById('folder-input').value = '';
   closeOverlay('music-prompt');
-  saveState();
+  saveState({ scheduleBackup: false });
 }
 
 // ─── visibilitychange ────────────────────────────────────────
@@ -2488,6 +2605,7 @@ function handleVisibilityChange() {
 
 // Audio events
 audio.addEventListener('timeupdate', () => {
+  if (isMusicLeader) musicChannel.postMessage({ type: 'TIME_UPDATE', state: getPlayerState() });
   if (!audio.duration) return;
   if (!playerSeeking) {
     const pct = (audio.currentTime / audio.duration) * 100;
@@ -2496,10 +2614,11 @@ audio.addEventListener('timeupdate', () => {
   document.getElementById('player-current').textContent = fmtTime(audio.currentTime);
 });
 audio.addEventListener('durationchange', () => {
+  if (isMusicLeader) musicChannel.postMessage({ type: 'TIME_UPDATE', state: getPlayerState() });
   document.getElementById('player-duration').textContent = fmtTime(audio.duration);
 });
-audio.addEventListener('play',  () => setPlayIcon(true));
-audio.addEventListener('pause', () => setPlayIcon(false));
+audio.addEventListener('play',  () => { setPlayIcon(true); if (isMusicLeader) musicChannel.postMessage({ type: 'TIME_UPDATE', state: getPlayerState() }); });
+audio.addEventListener('pause', () => { setPlayIcon(false); if (isMusicLeader) musicChannel.postMessage({ type: 'TIME_UPDATE', state: getPlayerState() }); });
 audio.addEventListener('ended', () => {
   if (state.player.repeat) { audio.currentTime = 0; audio.play(); }
   else nextTrack(true);
@@ -2510,14 +2629,17 @@ function loadFilesIntoPlaylist(files) {
     name: f.name.replace(/\.[^.]+$/, ''),
     artist: '',
     src: URL.createObjectURL(f),
+    file: f,
     type: 'file'
   }));
   playlist.push(...tracks);
   resetShuffleQueue();
   state.player.playlist.push(...tracks.map(t => ({ name: t.name, artist: t.artist, type: 'file', src: null })));
+  if (isMusicLeader) musicChannel.postMessage({ type: 'PLAYLIST_UPDATE', playlist: getSyncPlaylist() });
   if (!audio.src || audio.src === window.location.href) loadTrack(playlist.length - tracks.length, false);
-  if (state.settings.autoplay) audio.play().catch(() => {});
+  if (state.settings.autoplay && isMusicLeader) audio.play().catch(() => {});
   updatePlayerList();
+  saveState({ scheduleBackup: false });
 }
 
 function loadUrlIntoPlaylist(url) {
@@ -2527,8 +2649,9 @@ function loadUrlIntoPlaylist(url) {
   playlist.push(track);
   resetShuffleQueue();
   state.player.playlist.push({ ...track });
+  if (isMusicLeader) musicChannel.postMessage({ type: 'PLAYLIST_UPDATE', playlist: getSyncPlaylist() });
   if (!audio.src || audio.src === window.location.href) loadTrack(playlist.length - 1, true);
-  saveState();
+  saveState({ scheduleBackup: false });
   updatePlayerList();
 }
 
@@ -2840,23 +2963,29 @@ function bindAll() {
     state.player.shuffle = !state.player.shuffle;
     resetShuffleQueue();
     document.getElementById('btn-shuffle').classList.toggle('on', state.player.shuffle);
-    saveState();
+    saveState({ scheduleBackup: false });
   });
   document.getElementById('btn-repeat').addEventListener('click', () => {
     state.player.repeat = !state.player.repeat;
     document.getElementById('btn-repeat').classList.toggle('on', state.player.repeat);
-    saveState();
+    saveState({ scheduleBackup: false });
   });
   const seekEl = document.getElementById('player-seek');
   const setSeeking = v => {
     if (playerSeeking === v) return;
     playerSeeking = v;
     if (v) {
-      wasPlayingBeforeSeek = !audio.paused;
-      if (wasPlayingBeforeSeek) audio.pause();
+      wasPlayingBeforeSeek = isMusicLeader ? !audio.paused : slaveSyncState.playing;
+      if (wasPlayingBeforeSeek) {
+        if (isMusicLeader) audio.pause();
+        else musicChannel.postMessage({ type: 'CMD_PAUSE' });
+      }
       return;
     }
-    if (wasPlayingBeforeSeek) audio.play().catch(() => {});
+    if (wasPlayingBeforeSeek) {
+      if (isMusicLeader) audio.play().catch(() => {});
+      else musicChannel.postMessage({ type: 'CMD_PLAY' });
+    }
     wasPlayingBeforeSeek = false;
   };
   seekEl.addEventListener('pointerdown', () => setSeeking(true));
@@ -2864,15 +2993,19 @@ function bindAll() {
   seekEl.addEventListener('pointercancel', () => setSeeking(false));
   window.addEventListener('pointerup', () => setSeeking(false));
   seekEl.addEventListener('input', e => {
-    if (!audio.duration) return;
-    const t = (e.target.value / 100) * audio.duration;
-    audio.currentTime = t;
+    const duration = isMusicLeader ? audio.duration : slaveSyncState.duration;
+    if (!duration) return;
+    const t = (e.target.value / 100) * duration;
+    if (isMusicLeader) audio.currentTime = t;
+    else musicChannel.postMessage({ type: 'CMD_SEEK', time: t });
     document.getElementById('player-current').textContent = fmtTime(t);
   });
   document.getElementById('player-vol').addEventListener('input', e => {
-    audio.volume = parseFloat(e.target.value);
-    state.player.volume = audio.volume;
-    saveState();
+    const vol = parseFloat(e.target.value);
+    audio.volume = vol;
+    state.player.volume = vol;
+    saveState({ scheduleBackup: false });
+    if (!isMusicLeader) musicChannel.postMessage({ type: 'CMD_VOL', vol });
   });
   document.getElementById('btn-load-file').addEventListener('click', () => document.getElementById('file-input').click());
   document.getElementById('file-input').addEventListener('change', e => { if (e.target.files.length) loadFilesIntoPlaylist(e.target.files); });
@@ -2927,4 +3060,38 @@ function bindAll() {
     }, 120);
   });
   document.getElementById('tabs-scroll').addEventListener('scroll', updateTabsActivePill, { passive: true });
+}
+
+async function checkForUpdates() {
+  const now = Date.now();
+  if (now - (state.lastUpdateCheck || 0) < 86400000) return;
+  try {
+    const res = await fetch('https://api.github.com/repos/Tamp1x/SpaceDial/releases/latest');
+    const data = await res.json();
+    if (data.tag_name) {
+      state.lastUpdateCheck = now;
+      saveState({ scheduleBackup: false });
+      const remoteVersion = data.tag_name.replace(/^v/, '');
+      const localVersion = chrome.runtime.getManifest().version;
+      if (remoteVersion !== localVersion && remoteVersion !== state.ignoredUpdate) {
+        const msg = document.getElementById('update-toast-msg');
+        if (msg) msg.textContent = `Доступно обновление: ${data.tag_name}`;
+        const toast = document.getElementById('update-toast');
+        if (toast) toast.style.display = 'flex';
+        document.getElementById('update-toast-later').onclick = () => {
+          toast.style.display = 'none';
+          state.ignoredUpdate = remoteVersion;
+          saveState({ scheduleBackup: false });
+        };
+        document.getElementById('update-toast-download').onclick = () => {
+          toast.style.display = 'none';
+          pendingBackupSnapshot = buildExportableState(state);
+          saveBackupToFile();
+          window.open(data.html_url || 'https://github.com/Tamp1x/SpaceDial/releases/latest', '_blank');
+        };
+      }
+    }
+  } catch(e) {
+    console.error('Update check failed:', e);
+  }
 }
