@@ -38,6 +38,28 @@ const DEFAULT_STATE = () => ({
     showNotes: true,
     speedTestMode: 'ookla',
     musicLeave: 'stop',
+    weatherCity: 'Dublin',
+    tempUnit: 'celsius',
+    cols: 5,
+    dialShape: 'wide',
+    showLabel: true,
+    showFavicon: true,
+    showFooter: true,
+    hoverZoom: true,
+    glass: true,
+    showBorder: true,
+    dialIconScale: 100,
+    showAddDialButton: true,
+    showClock: true,
+    use24h: true,
+    showSeconds: false,
+    showWeather: true,
+    showWeatherForecast: true,
+    weatherForecastDays: 7,
+    showPlayer: true,
+    showNotes: true,
+    speedTestMode: 'ookla',
+    musicLeave: 'stop',
     autoplay: false,
     loopPlaylist: true,
     shuffleOnStart: false,
@@ -51,7 +73,8 @@ const DEFAULT_STATE = () => ({
     repeat: false,
     volume: 1,
     position: 0
-  }
+  },
+  lastWeatherAtmosphere: null
 });
 
 let state = DEFAULT_STATE();
@@ -151,6 +174,7 @@ function makeBackupFingerprintSource(snapshot) {
   // Ignore transient/UI-only changes to avoid noisy backup prompts.
   const copy = buildExportableState(snapshot);
   delete copy.activeGroup;
+  delete copy.lastWeatherAtmosphere;
   if (copy.player) delete copy.player.position;
   if (copy.settings) {
     delete copy.settings.bgType;
@@ -220,7 +244,7 @@ async function loadState() {
         state.settings.weatherEffect = normalizeWeatherEffect(state.settings.weatherEffect);
         delete state.settings.bgImage;
         state.player = { ...DEFAULT_STATE().player, ...(saved.player || {}) };
-        state.notes = saved.notes || '';
+        state.notes = saved.notes || ''; if (saved.lastWeatherAtmosphere !== undefined) { state.lastWeatherAtmosphere = saved.lastWeatherAtmosphere; lastWeatherAtmosphere = saved.lastWeatherAtmosphere; }
         if (!state.groups.some(g => g.id === state.activeGroup)) state.activeGroup = 'home';
       }
       res();
@@ -294,6 +318,17 @@ function applySettings(initial) {
   const bgLayer = document.getElementById('bg-layer');
   const weatherLayer = document.getElementById('weather-layer');
   const starsCanvas = document.getElementById('stars-canvas');
+  
+  if (initial) {
+    bgLayer.style.transition = 'none';
+    const tabBar = document.getElementById('tab-bar');
+    if (tabBar) tabBar.style.transition = 'none';
+  } else {
+    bgLayer.style.transition = '';
+    const tabBar = document.getElementById('tab-bar');
+    if (tabBar) tabBar.style.transition = '';
+  }
+
   const bgType = getResolvedBgType();
   const weatherEffect = getResolvedWeatherEffect();
   root.dataset.bg = bgType;
@@ -826,6 +861,8 @@ async function fetchWeather() {
     }
   } catch(e) {
     lastWeatherAtmosphere = null;
+    state.lastWeatherAtmosphere = null;
+    saveState({ scheduleBackup: false });
     applySettings();
     document.getElementById('weather-city').textContent = city.toUpperCase();
     document.getElementById('weather-desc').textContent = 'UNAVAILABLE';
@@ -837,6 +874,8 @@ function updateAtmosphereFromWeather(data) {
   const phase = state.settings.autoDayNight ? getDayPhase(data) : null;
   const effect = state.settings.autoWeather ? getWeatherEffect(data.current || {}) : null;
   lastWeatherAtmosphere = { phase, effect };
+  state.lastWeatherAtmosphere = lastWeatherAtmosphere;
+  saveState({ scheduleBackup: false });
   applySettings();
 }
 
