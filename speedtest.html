@@ -3,191 +3,114 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DialSpace SpeedTest</title>
+<title>SpeedTest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #07070e;
-    --surface: rgba(255,255,255,0.05);
-    --surface-2: rgba(255,255,255,0.08);
-    --border: rgba(255,255,255,0.12);
-    --text: #f0f0f0;
-    --muted: rgba(255,255,255,0.48);
-    --ok: #79c48f;
-    --danger: #e05555;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body {
-    width: 100%;
-    height: 100%;
-    background: radial-gradient(circle at top, #12122a 0%, var(--bg) 52%);
-    color: var(--text);
-    font-family: "Rajdhani", Arial, sans-serif;
-  }
-  body {
-    padding: 14px;
-  }
-  .card {
-    height: 100%;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    border-radius: 14px;
-    backdrop-filter: blur(14px);
-    box-shadow: 0 20px 42px rgba(0,0,0,0.45);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .head {
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  .title {
-    font-size: 15px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: #fff;
-    font-weight: 700;
-  }
-  .status {
-    font-size: 12px;
-    color: var(--muted);
-    letter-spacing: 0.08em;
-  }
-  .body {
-    padding: 14px 16px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    flex: 1;
-  }
-  .metrics {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-  }
-  .metric {
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    border-radius: 10px;
-    padding: 10px;
-  }
-  .metric .label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--muted);
-  }
-  .metric .val {
-    margin-top: 6px;
-    font-size: 27px;
-    letter-spacing: 0.04em;
-    color: #fff;
-    font-weight: 700;
-    line-height: 1;
-  }
-  .metric .unit {
-    font-size: 13px;
-    color: var(--muted);
-    margin-top: 4px;
-  }
-  #progress-wrap {
-    margin-top: 6px;
-  }
-  #progress-label {
-    font-size: 12px;
-    color: var(--muted);
-    margin-bottom: 6px;
-  }
-  #progress {
-    width: 100%;
-    height: 6px;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.12);
-    overflow: hidden;
-  }
-  #progress > div {
-    width: 0%;
-    height: 100%;
-    background: linear-gradient(90deg, #71a8ff, #90f0c2);
-    transition: width .2s ease;
-  }
-  #hint {
-    margin-top: 4px;
-    font-size: 12px;
-    color: var(--muted);
-    line-height: 1.35;
-  }
-  .row {
-    display: flex;
-    gap: 8px;
-    margin-top: auto;
-  }
-  button {
-    flex: 1;
-    border-radius: 9px;
-    border: 1px solid var(--border);
-    background: rgba(255,255,255,0.09);
-    color: #fff;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    font-weight: 700;
-    padding: 11px 10px;
-    cursor: pointer;
-    transition: all .16s ease;
-  }
-  button:hover { background: rgba(255,255,255,0.16); }
-  button:disabled { opacity: 0.55; cursor: default; }
-  #stop-btn {
-    color: var(--danger);
-    background: rgba(224,85,85,0.12);
-  }
-  #stop-btn:hover { background: rgba(224,85,85,0.2); }
+:root {
+  --text:#f0f0f0; --muted:rgba(255,255,255,0.3);
+  --ring:rgba(255,255,255,0.12); --ring-fill:#fff;
+  --glow:rgba(255,255,255,0.06); --go:#fff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{
+  width:100%;height:100%;overflow:hidden;
+  font-family:'Rajdhani',sans-serif;
+  display:flex;align-items:flex-start;justify-content:center;
+  padding-top:12px;
+}
+
+.wrap{
+  display:flex;flex-direction:column;align-items:center;
+  gap:12px;padding:10px 14px;width:100%;max-width:340px;
+}
+
+.circle{
+  position:relative;width:130px;height:130px;cursor:pointer;flex-shrink:0;
+}
+.circle svg{width:100%;height:100%;transform:rotate(-90deg)}
+.circle-bg{fill:none;stroke:var(--ring);stroke-width:4;transition:stroke .3s}
+.circle-fill{
+  fill:none;stroke:var(--ring-fill);stroke-width:4;stroke-linecap:round;
+  stroke-dasharray:345.58;stroke-dashoffset:345.58;
+  transition:stroke-dashoffset .1s linear,stroke .3s;
+  filter:drop-shadow(0 0 6px var(--glow));
+}
+.circle-in{
+  position:absolute;inset:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  border-radius:50%;user-select:none;
+  backdrop-filter:blur(12px);
+  background:rgba(255,255,255,0.03);
+  transition:background .2s;
+}
+.circle:hover .circle-in{background:rgba(255,255,255,0.06)}
+.circle:active .circle-in{transform:scale(.96)}
+.go-text{
+  font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:.06em;
+  color:var(--go);transition:color .3s;
+}
+.speed-text{
+  font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:.04em;
+  color:var(--text);line-height:1;display:none;transition:color .3s;
+}
+.speed-unit{
+  font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);display:none;transition:color .3s;
+}
+
+.res{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+.r{text-align:center;padding:6px 8px}
+.r .lbl{font-size:9px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);transition:color .3s}
+.r .num{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:.04em;color:var(--text);line-height:1.2;transition:color .3s}
+.r .suf{font-size:10px;color:var(--muted);letter-spacing:.06em;transition:color .3s}
+.r-ping{grid-column:1/-1;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:8px;padding:0}
+.r-ping .lbl{font-size:9px}
+.r-ping .num{font-size:16px}
+.r-ping .suf{font-size:10px}
+
+.status{font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);min-height:1.3em;transition:color .3s}
+
+@keyframes pulse{0%,100%{opacity:.2}50%{opacity:1}}
+.loading{animation:pulse .9s ease-in-out infinite}
 </style>
 </head>
 <body>
-  <div class="card">
-    <div class="head">
-      <div class="title">DialSpace SpeedTest</div>
-      <div id="status" class="status">Idle</div>
-    </div>
-    <div class="body">
-      <div class="metrics">
-        <div class="metric">
-          <div class="label">Download</div>
-          <div class="val" id="down-val">--</div>
-          <div class="unit">Mbps</div>
-        </div>
-        <div class="metric">
-          <div class="label">Upload</div>
-          <div class="val" id="up-val">--</div>
-          <div class="unit">Mbps</div>
-        </div>
-        <div class="metric">
-          <div class="label">Ping</div>
-          <div class="val" id="ping-val">--</div>
-          <div class="unit">ms</div>
-        </div>
-        <div class="metric">
-          <div class="label">Quality</div>
-          <div class="val" id="qual-val">--</div>
-          <div class="unit">score</div>
-        </div>
-      </div>
-      <div id="progress-wrap">
-        <div id="progress-label">Ready</div>
-        <div id="progress"><div></div></div>
-      </div>
-      <div id="hint">This mini test runs in a separate popup, so you can keep browsing other tabs while it measures speed.</div>
-      <div class="row">
-        <button id="start-btn">Start test</button>
-        <button id="stop-btn" disabled>Stop</button>
-      </div>
+<div class="wrap">
+
+  <div class="circle" id="btn">
+    <svg viewBox="0 0 110 110">
+      <circle class="circle-bg" cx="55" cy="55" r="50"/>
+      <circle class="circle-fill" id="gauge-fill" cx="55" cy="55" r="50"/>
+    </svg>
+    <div class="circle-in" id="btn-in">
+      <div class="go-text" id="go-text">GO</div>
+      <div class="speed-text" id="speed-text"></div>
+      <div class="speed-unit" id="speed-unit">Mbps</div>
     </div>
   </div>
-  <script src="speedtest.js"></script>
+
+  <div class="res">
+    <div class="r">
+      <div class="lbl">Download</div>
+      <div class="num" id="m-down">—</div>
+      <div class="suf">Mbps</div>
+    </div>
+    <div class="r">
+      <div class="lbl">Upload</div>
+      <div class="num" id="m-up">—</div>
+      <div class="suf">Mbps</div>
+    </div>
+    <div class="r r-ping">
+      <div class="lbl">Ping</div>
+      <div class="num" id="m-ping">—</div>
+      <div class="suf">ms</div>
+    </div>
+  </div>
+
+  <div class="status" id="status">Ready</div>
+
+</div>
+<script src="speedtest.js"></script>
 </body>
 </html>

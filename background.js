@@ -44,6 +44,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     focusSession = null;
     chrome.storage.session.remove('ds3focus');
     if (focusTimerId) { clearInterval(focusTimerId); focusTimerId = null; }
+    chrome.runtime.sendMessage({ type: 'focus-ended' }).catch(() => {});
     sendResponse({ ok: true });
   } else if (msg.type === 'music-notify') {
     notifTabId = sender.tab?.id;

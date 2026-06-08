@@ -301,13 +301,29 @@ function normalizeWeatherEffect(value) {
 }
 
 function getResolvedBgType() {
-  const autoPhase = state.settings.autoDayNight ? lastWeatherAtmosphere?.phase : null;
-  return normalizeBgType(autoPhase || state.settings.bgType);
+  if (state.settings.autoDayNight) {
+    if (lastWeatherAtmosphere?.phase) {
+      return normalizeBgType(lastWeatherAtmosphere.phase);
+    }
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 8) return 'sunrise';
+    if (hour >= 8 && hour < 18) return 'day';
+    if (hour >= 18 && hour < 21) return 'sunset';
+    return 'night';
+  }
+  return normalizeBgType(state.settings.bgType);
 }
 
 function getResolvedWeatherEffect() {
-  const autoEffect = state.settings.autoWeather ? lastWeatherAtmosphere?.effect : null;
-  return normalizeWeatherEffect(autoEffect || state.settings.weatherEffect);
+  if (state.settings.autoWeather) {
+    if (lastWeatherAtmosphere?.effect) {
+      return normalizeWeatherEffect(lastWeatherAtmosphere.effect);
+    }
+    const bg = getResolvedBgType();
+    if (bg === 'night' || bg === 'sunset') return 'clear';
+    return 'cloudy';
+  }
+  return normalizeWeatherEffect(state.settings.weatherEffect);
 }
 
 function backgroundUsesStars(bgType = getResolvedBgType()) {
@@ -391,6 +407,7 @@ function applySettings(initial) {
 
   if (backgroundUsesStars(bgType)) drawStars();
   drawWeatherEffect(weatherEffect);
+  updateSpeedTestTheme();
 }
 
 // ─── Stars ──────────────────────────────────────────────────
@@ -564,7 +581,7 @@ function drawWeatherEffect(effect = getResolvedWeatherEffect()) {
   let lastTime = performance.now();
 
   if (mode === 'rain') {
-    const count = Math.min(420, Math.max(180, Math.round((c.width * c.height) / 5200)));
+    const count = Math.min(450, Math.max(180, Math.round((c.width * c.height) / 5500)));
     particles = Array.from({ length: count }, () => makeRainDrop(c, rand, true));
   } else if (mode === 'snow') {
     const count = Math.min(240, Math.max(90, Math.round((c.width * c.height) / 9800)));
@@ -588,17 +605,17 @@ function drawWeatherEffect(effect = getResolvedWeatherEffect()) {
     ctx.clearRect(0, 0, c.width, c.height);
 
     if (mode === 'rain') {
-      ctx.lineCap = 'round';
+      ctx.lineCap = 'butt';
       for (const drop of particles) {
-        drop.x += (drop.wind + Math.sin(now * drop.wobbleSpeed + drop.phase) * drop.wobble) * dt;
+        drop.x += drop.wind * dt;
         drop.y += drop.speed * dt;
-        if (drop.y - drop.len > c.height || drop.x > c.width + 120) Object.assign(drop, makeRainDrop(c, rand, false));
-        const alpha = drop.alpha * (0.78 + Math.sin(now * 0.0017 + drop.phase) * 0.16);
-        ctx.strokeStyle = `rgba(190,220,255,${alpha})`;
+        if (drop.y - drop.len > c.height || drop.x > c.width + 120 || drop.x < -120) Object.assign(drop, makeRainDrop(c, rand, false));
+        const alpha = drop.alpha * (0.8 + Math.sin(now * 0.0015 + drop.phase) * 0.12);
+        ctx.strokeStyle = `rgba(170,210,245,${alpha})`;
         ctx.lineWidth = drop.width;
         ctx.beginPath();
-        ctx.moveTo(drop.x, drop.y);
-        ctx.lineTo(drop.x - drop.slant, drop.y - drop.len);
+        ctx.moveTo(drop.x - drop.slant, drop.y - drop.len);
+        ctx.lineTo(drop.x, drop.y);
         ctx.stroke();
       }
     } else if (mode === 'snow') {
@@ -684,17 +701,18 @@ function drawWeatherEffect(effect = getResolvedWeatherEffect()) {
 }
 
 function makeRainDrop(c, rand, initial) {
+  const wind = rand(-2.5, 4.5);
   return {
     x: rand(-80, c.width + 80),
-    y: initial ? rand(-c.height, c.height) : rand(-180, -20),
-    len: rand(18, 62),
-    speed: rand(13, 28),
-    slant: rand(7, 22),
-    wind: rand(0.8, 4.8),
-    width: rand(0.55, 1.65),
-    alpha: rand(0.14, 0.38),
-    wobble: rand(0.05, 0.55),
-    wobbleSpeed: rand(0.001, 0.004),
+    y: initial ? rand(-c.height * 0.5, 0) : rand(-200, -40),
+    len: rand(60, 180),
+    speed: rand(18, 32),
+    slant: wind * 3 + rand(-0.5, 0.5),
+    wind: wind,
+    width: rand(0.5, 1.4),
+    alpha: rand(0.18, 0.42),
+    wobble: 0,
+    wobbleSpeed: 0,
     phase: Math.random() * Math.PI * 2
   };
 }
@@ -1710,9 +1728,23 @@ function openSpeedTestPanel() {
   const panel = document.getElementById('speedtest-panel');
   const frame = document.getElementById('speedtest-frame');
   if (!panel || !frame) return;
-  if (!frame.src) frame.src = chrome.runtime.getURL('speedtest.html');
+  if (!frame.src) {
+    const p = new URLSearchParams({ bg: getResolvedBgType(), weather: getResolvedWeatherEffect() });
+    frame.src = chrome.runtime.getURL('speedtest.html?' + p);
+  }
   panel.style.display = 'block';
   requestAnimationFrame(() => panel.classList.add('open'));
+}
+
+function updateSpeedTestTheme() {
+  const frame = document.getElementById('speedtest-frame');
+  if (frame?.contentWindow) {
+    frame.contentWindow.postMessage({
+      type: 'theme-update',
+      bg: getResolvedBgType(),
+      weather: getResolvedWeatherEffect()
+    }, '*');
+  }
 }
 
 function closeSpeedTestPanel() {
@@ -2346,6 +2378,11 @@ function showBlockedToast(hardBlock) {
   clearTimeout(toast._t);
   toast._t = setTimeout(() => { toast.style.display = 'none'; }, 4000);
 }
+
+// Listen for focus ended from another tab
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'focus-ended') endFocusSession(false);
+});
 
 // ─── Music Player ────────────────────────────────────────────
 let playlist = [];

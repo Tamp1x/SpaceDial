@@ -23,6 +23,7 @@
   --muted: rgba(255,255,255,0.38);
   --danger: #e05555;
   --radius: 14px;
+  --overlay-op: 0.35;
 }
 
 html, body {
@@ -32,9 +33,33 @@ html, body {
   display: flex; align-items: center; justify-content: center;
 }
 
-/* Animated background */
-#stars-canvas {
-  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+#stars-canvas { position:fixed; inset:0; z-index:0; pointer-events:none; }
+#bg-layer,
+#weather-layer { position:fixed; inset:0; pointer-events:none; }
+#bg-layer     { z-index:1; background-size:cover; background-position:center; transition:background 1.2s ease; }
+#weather-layer { z-index:2; opacity:0.96; }
+#bg-overlay   { position:fixed; inset:0; z-index:3; background:linear-gradient(to bottom,rgba(0,0,0,var(--overlay-op)) 0%,transparent 35%,transparent 65%,rgba(0,0,0,var(--overlay-op)) 100%); pointer-events:none; }
+
+#bg-layer.bg-night {
+  background:
+    radial-gradient(circle at 72% 18%, rgba(190,210,255,0.16) 0 7%, transparent 18%),
+    radial-gradient(circle at 24% 88%, rgba(70,100,170,0.22), transparent 38%),
+    linear-gradient(180deg, rgba(3,5,18,0.2), rgba(6,6,20,0.8) 52%, rgba(2,3,9,0.94));
+}
+#bg-layer.bg-sunrise {
+  background:
+    radial-gradient(circle at 22% 76%, rgba(255,222,149,0.95) 0 7%, rgba(255,146,104,0.38) 18%, transparent 36%),
+    linear-gradient(180deg, #2d4468 0%, #b4758b 45%, #f0a96c 72%, #1d3145 100%);
+}
+#bg-layer.bg-day {
+  background:
+    radial-gradient(circle at 78% 18%, rgba(255,255,225,0.9) 0 5%, rgba(255,242,166,0.28) 15%, transparent 32%),
+    linear-gradient(180deg, #4d8fc4 0%, #72b3d6 47%, #b7d6ca 100%);
+}
+#bg-layer.bg-sunset {
+  background:
+    radial-gradient(circle at 72% 70%, rgba(255,139,77,0.9) 0 7%, rgba(228,83,92,0.28) 20%, transparent 38%),
+    linear-gradient(180deg, rgba(39,34,76,0.62) 0%, rgba(111,63,111,0.8) 46%, rgba(225,103,72,0.76) 72%, rgba(9,10,24,0.9) 100%);
 }
 
 .wrap {
@@ -68,7 +93,7 @@ html, body {
 .blocked-url {
   font-size: 13px; color: var(--muted);
   margin-bottom: 32px; word-break: break-all;
-  background: rgba(255,255,255,0.04);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px; padding: 10px 16px;
 }
@@ -121,6 +146,9 @@ html, body {
 <body>
 
 <canvas id="stars-canvas"></canvas>
+<div id="bg-layer"></div>
+<canvas id="weather-layer"></canvas>
+<div id="bg-overlay"></div>
 
 <div class="wrap">
   <div class="shield-icon">
