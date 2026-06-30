@@ -78,6 +78,8 @@ let visibleModels = null;
 function saveChats() { try { localStorage.setItem('ai-chats', JSON.stringify(chats)); } catch {} }
 function loadChats() { try { const d = JSON.parse(localStorage.getItem('ai-chats')); if (d && d.length) { chats = d; activeChatId = chats[0].id; } } catch {} }
 loadChats();
+removeEmptyChats();
+saveChats();
 const savedModel = localStorage.getItem('ai-model');
 if (savedModel && MODELS.find(m => m.id === savedModel)) selectedModel = savedModel;
 try { const vm = JSON.parse(localStorage.getItem('ai-visible-models')); if (Array.isArray(vm)) visibleModels = vm; } catch {}
@@ -182,7 +184,15 @@ function renderChatList() {
   if (active && others.length) { const sep = document.createElement('div'); sep.className = 'ai-chat-sep'; list.appendChild(sep); }
   others.forEach(c => appendChat(c, false));
 }
-function switchChat(id) { viewingChatId = id; attachedFiles = []; renderAttachBar(); renderChatList(); renderMessages(); }
+function switchChat(id) {
+  if (id !== activeChatId) {
+    const active = getActiveChat();
+    if (active && active.messages.length === 0 && chats.length > 1) {
+      chats = chats.filter(c => c.id !== active.id);
+    }
+  }
+  viewingChatId = id; attachedFiles = []; renderAttachBar(); renderChatList(); renderMessages();
+}
 function deleteChat(id) {
   if (chats.length <= 1) return;
   chats = chats.filter(c => c.id !== id);
@@ -191,10 +201,18 @@ function deleteChat(id) {
   saveChats(); renderChatList(); renderMessages();
 }
 function createNewChat() {
+  removeEmptyChats();
   const id = 'chat-' + Date.now();
   chats.unshift({ id, name:'New chat', messages:[] });
   activeChatId = id; viewingChatId = null; attachedFiles = [];
   renderAttachBar(); saveChats(); renderChatList(); renderMessages();
+}
+function removeEmptyChats() {
+  const nonEmpty = chats.filter(c => c.messages.length > 0);
+  if (nonEmpty.length === 0) return;
+  chats = nonEmpty;
+  if (!chats.find(c => c.id === activeChatId)) activeChatId = chats[0].id;
+  if (viewingChatId && !chats.find(c => c.id === viewingChatId)) viewingChatId = null;
 }
 function getActiveChat() { return chats.find(c => c.id === activeChatId) || chats[0]; }
 function getDisplayedChat() { const id = viewingChatId || activeChatId; return chats.find(c => c.id === id) || getActiveChat(); }
@@ -240,11 +258,12 @@ function renderMessages() {
     const el = document.createElement('div');
     el.className = 'ai-msg';
     el.style.justifyContent = m.role === 'user' ? 'flex-end' : 'flex-start';
-    let content = m.content || '';
+    let fileHtml = '';
     if (m.files && m.files.length) {
-      content = m.files.map(f => { if (f.type === 'image') return `<img src="${f.data}" style="max-width:200px;max-height:200px;border-radius:8px;display:block;margin-bottom:4px">`; return `<span style="font-size:12px;color:rgba(255,255,255,0.4)">📎 ${f.name}</span>`; }).join('') + content;
+      fileHtml = m.files.map(f => { if (f.type === 'image') return `<img src="${f.data}" style="max-width:200px;max-height:200px;border-radius:8px;display:block;margin-bottom:4px">`; return `<span style="font-size:12px;color:rgba(255,255,255,0.4)">📎 ${f.name}</span>`; }).join('');
     }
-    const formatted = m.role === 'user' ? escapeHtml(content).replace(/\n/g, '<br>') : formatContent(content);
+    const contentText = m.content || '';
+    const formatted = m.role === 'user' ? fileHtml + escapeHtml(contentText).replace(/\n/g, '<br>') : fileHtml + formatContent(contentText);
     el.innerHTML = `<div class="ai-msg-bubble" style="${m.role === 'user' ? 'background:rgba(100,180,255,0.15);color:rgba(200,230,255,0.9)' : ''}">${formatted}</div>`;
     container.appendChild(el);
   });
