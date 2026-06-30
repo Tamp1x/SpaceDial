@@ -45,7 +45,8 @@ const DEFAULT_STATE = () => ({
     autoplay: false,
     loopPlaylist: true,
     shuffleOnStart: false,
-    blockedDomains: 'youtube.com\ntiktok.com\ntwitter.com\nx.com\ninstagram.com\nfacebook.com\nreddit.com\nnetflix.com\ntwitch.tv\ntumblr.com\npinterest.com'
+    blockedDomains: 'youtube.com\ntiktok.com\ntwitter.com\nx.com\ninstagram.com\nfacebook.com\nreddit.com\nnetflix.com\ntwitch.tv\ntumblr.com\npinterest.com',
+    updatePath: ''
   },
   notes: '',
   player: {
@@ -106,6 +107,7 @@ let dragDropIndicator = null;
 let notesSaveTimer = null;
 let autoBackupTimer = null;
 let pendingBackupSnapshot = null;
+
 let lastBackupFingerprint = '';
 let lastPromptFingerprint = '';
 let backupPromptVisible = false;
@@ -139,7 +141,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }, 4000);
   checkForUpdates();
-
   // Listen for AI tool state changes from the AI panel iframe
   window.addEventListener('message', async (e) => {
     if (e.data?.type === 'spacedial-state-changed') {
@@ -2114,6 +2115,7 @@ function openSettings(triggerEl) {
   document.getElementById('s-loop').checked = s.loopPlaylist;
   document.getElementById('s-shuffle-start').checked = s.shuffleOnStart;
   document.getElementById('s-blocked-domains').value = s.blockedDomains || '';
+  document.getElementById('s-update-path').value = s.updatePath || '';
   chrome.storage.local.get('ai-funny-thinking', r => { document.getElementById('s-ai-funny').checked = !!r['ai-funny-thinking']; });
   switchSettingsSection('appearance');
   document.querySelector('.settings-version').textContent = 'v' + chrome.runtime.getManifest().version;
@@ -2172,6 +2174,7 @@ async function saveSettings() {
   s.loopPlaylist = document.getElementById('s-loop').checked;
   s.shuffleOnStart = document.getElementById('s-shuffle-start').checked;
   s.blockedDomains = document.getElementById('s-blocked-domains').value;
+  s.updatePath = document.getElementById('s-update-path').value.trim();
 
   saveState();
   applySettings();
@@ -3454,13 +3457,15 @@ function bindAll() {
     }
   });
   document.getElementById('s-reset').addEventListener('click', doReset);
-  document.getElementById('s-check-update').addEventListener('click', async () => {
-    const statusEl = document.getElementById('s-update-status');
+  async function runUpdateCheck(buttonId, statusId) {
+    const statusEl = document.getElementById(statusId);
+    if (!statusEl) return;
     statusEl.textContent = 'Checking...';
     statusEl.style.color = 'var(--muted)';
     try {
       const repoUrl = chrome.runtime.getManifest().homepage_url || 'https://github.com/Tamp1x/SpaceDial';
       const apiRepo = repoUrl.replace('https://github.com/', '').replace(/\/$/, '');
+      const zipUrl = `https://github.com/${apiRepo}/archive/refs/heads/master.zip`;
       const ac = new AbortController();
       const to = setTimeout(() => ac.abort(), 10000);
       const res = await fetch(`https://api.github.com/repos/${apiRepo}/releases/latest`, { signal: ac.signal });
@@ -3471,20 +3476,16 @@ function bindAll() {
         const remote = data.tag_name.replace(/^v/, '');
         const local = chrome.runtime.getManifest().version;
         if (remote !== local) {
-          statusEl.innerHTML = `Update available: ${data.tag_name} <button id="s-install-update" style="background:rgba(85,200,130,0.2);color:rgba(150,255,200,0.9);border:1px solid rgba(85,200,130,0.3);border-radius:6px;padding:2px 10px;cursor:pointer;font:inherit;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-left:6px">Install</button> <a href="${data.html_url || repoUrl + '/releases/latest'}" target="_blank" style="color:var(--muted);font-size:11px;margin-left:4px">zip</a>`;
+          statusEl.innerHTML = `Update ${data.tag_name} <button id="s-install-update" style="background:rgba(85,200,130,0.2);color:rgba(150,255,200,0.9);border:1px solid rgba(85,200,130,0.3);border-radius:6px;padding:2px 10px;cursor:pointer;font:inherit;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-left:6px">Install</button>`;
           statusEl.style.color = 'var(--accent)';
           setTimeout(() => {
             const btn = document.getElementById('s-install-update');
             if (btn) btn.onclick = async () => {
               btn.disabled = true; btn.textContent = '…';
               try {
-                await performInstall(data.zipball_url);
+                await performInstall(zipUrl);
               } catch(e) {
-                if (e.message !== 'Directory selection cancelled') {
-                  statusEl.textContent = 'Install failed — download zip manually';
-                } else {
-                  statusEl.textContent = 'Cancelled';
-                }
+                statusEl.textContent = e.message === 'Cancelled' ? 'Cancelled' : 'Failed: ' + e.message;
                 btn.disabled = false; btn.textContent = 'Install';
               }
             };
@@ -3498,6 +3499,23 @@ function bindAll() {
       statusEl.textContent = 'Check failed';
       statusEl.style.color = 'var(--danger)';
     }
+  }
+  document.getElementById('s-check-update').addEventListener('click', () => runUpdateCheck('s-check-update', 's-update-status'));
+  document.getElementById('s-check-update-footer').addEventListener('click', () => runUpdateCheck('s-check-update-footer', 's-update-status'));
+  document.getElementById('s-update-browse').addEventListener('click', () => {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.webkitdirectory = true;
+    inp.style.display = 'none';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', () => {
+      if (inp.files.length) {
+        const f = inp.files[0];
+        document.getElementById('s-update-path').value = f.path ? f.path.substring(0, f.path.length - f.webkitRelativePath.length).replace(/\/$/, '') : f.webkitRelativePath.split('/')[0];
+      }
+      document.body.removeChild(inp);
+    });
+    inp.click();
   });
   document.getElementById('s-cloud-save').addEventListener('click', doCloudSave);
   document.getElementById('s-cloud-load').addEventListener('click', doCloudLoad);
@@ -3714,75 +3732,61 @@ function bindAll() {
   document.getElementById('tabs-scroll').addEventListener('scroll', updateTabsActivePill, { passive: true });
 }
 
-/* ─── Auto-update via File System Access API ──── */
-const UPDATE_DB = 'spacedial-update-dir';
-async function getDirHandle() {
-  return new Promise(resolve => {
-    const r = indexedDB.open(UPDATE_DB, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('h');
-    r.onsuccess = () => {
-      const t = r.result.transaction('h', 'readonly');
-      const g = t.objectStore('h').get('dir');
-      g.onsuccess = async () => {
-        let h = g.result;
-        if (h) {
-          try { if ((await h.requestPermission({mode:'readwrite'})) === 'granted') { resolve(h); return; } } catch {}
-        }
-        resolve(null);
-      };
-      g.onerror = () => resolve(null);
-    };
-    r.onerror = () => resolve(null);
-  });
-}
-async function saveDirHandle(h) {
-  return new Promise((resolve, reject) => {
-    const r = indexedDB.open(UPDATE_DB, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore('h');
-    r.onsuccess = () => {
-      const t = r.result.transaction('h', 'readwrite');
-      t.objectStore('h').put(h, 'dir');
-      t.oncomplete = resolve;
-    };
-  });
-}
-async function writeFilesToDir(rootDir, zip) {
-  const entries = Object.entries(zip.files).filter(([,e]) => !e.dir);
-  for (const [path, entry] of entries) {
-    try {
-      const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
-      parts.shift(); // strip GitHub's top-level dir (repo-hash)
-      if (!parts.length) continue;
-      const name = parts.pop();
-      let dir = rootDir;
-      for (const p of parts) dir = await dir.getDirectoryHandle(p, {create:true});
-      const fh = await dir.getFileHandle(name, {create:true});
-      const ws = await fh.createWritable();
-      const buf = await entry.async('uint8array');
-      await ws.write(buf);
-      await ws.close();
-    } catch(e) { console.warn('Skipped file:', path, e); }
-  }
-}
+/* ─── Auto-update ──────────────────────────────── */
 async function performInstall(zipUrl) {
   if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
-  let dir = await getDirHandle();
-  if (!dir) {
-    try {
-      dir = await window.showDirectoryPicker({mode:'readwrite', id:'spacedial-update'});
-      await saveDirHandle(dir);
-    } catch { throw new Error('Directory selection cancelled'); }
-  }
   const msg = document.getElementById('update-toast-msg') || document.getElementById('s-update-status');
   if (msg) msg.textContent = 'Downloading…';
   const resp = await fetch(zipUrl);
   const blob = await resp.blob();
-  if (msg) msg.textContent = 'Extracting…';
-  const zip = await JSZip.loadAsync(blob);
-  if (msg) msg.textContent = 'Writing files…';
-  await writeFilesToDir(dir, zip);
-  if (msg) msg.textContent = 'Reloading…';
-  setTimeout(() => chrome.runtime.reload(), 500);
+  // Try File System Access API
+  if (typeof window.showDirectoryPicker === 'function') {
+    try {
+      const dir = await window.showDirectoryPicker({mode:'readwrite', id:'spacedial-update'});
+      if (msg) msg.textContent = 'Extracting…';
+      const zip = await JSZip.loadAsync(blob);
+      if (msg) msg.textContent = 'Writing files…';
+      const entries = Object.entries(zip.files).filter(([,e]) => !e.dir);
+      for (const [path, entry] of entries) {
+        try {
+          const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+          parts.shift(); // strip 'SpaceDial-master' top-level dir
+          if (!parts.length) continue;
+          const name = parts.pop();
+          let d = dir;
+          for (const p of parts) d = await d.getDirectoryHandle(p, {create:true});
+          const fh = await d.getFileHandle(name, {create:true});
+          const ws = await fh.createWritable();
+          await ws.write(await entry.async('uint8array'));
+          await ws.close();
+        } catch(e) { console.warn('Skipped file:', path, e); }
+      }
+      if (msg) msg.textContent = 'Reloading…';
+      return setTimeout(() => chrome.runtime.reload(), 500);
+    } catch(e) {
+      if (e.name === 'AbortError') throw new Error('Cancelled');
+    }
+  }
+  // Fallback: download as SpaceDial-master.zip
+  if (msg) msg.textContent = 'Downloading SpaceDial-master.zip…';
+  const blobUrl = URL.createObjectURL(blob);
+  const dlFilename = 'SpaceDial-master.zip';
+  try {
+    await chrome.downloads.download({ url: blobUrl, filename: dlFilename, saveAs: true });
+  } catch {
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = dlFilename;
+    a.click();
+  }
+  const extPath = state.settings?.updatePath || 'your SpaceDial folder';
+  if (msg) {
+    msg.innerHTML = `Extract to <code style="font-size:11px;opacity:0.7">${extPath}</code> then press <button id="s-reload-ext" style="background:rgba(85,160,224,0.2);color:rgba(150,210,255,0.9);border:1px solid rgba(85,160,224,0.3);border-radius:6px;padding:2px 10px;cursor:pointer;font:inherit;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-left:4px">Reload</button>`;
+    setTimeout(() => {
+      const rb = document.getElementById('s-reload-ext');
+      if (rb) rb.onclick = () => chrome.runtime.reload();
+    }, 0);
+  }
 }
 
 async function checkForUpdates() {
@@ -3799,8 +3803,9 @@ async function checkForUpdates() {
       const remoteVersion = data.tag_name.replace(/^v/, '');
       const localVersion = chrome.runtime.getManifest().version;
       if (remoteVersion !== localVersion && remoteVersion !== state.ignoredUpdate) {
+        const zipUrl = `https://github.com/${apiRepo}/archive/refs/heads/master.zip`;
         const msg = document.getElementById('update-toast-msg');
-        if (msg) msg.textContent = `Доступно обновление: ${data.tag_name}`;
+        if (msg) msg.textContent = `Update ${data.tag_name}`;
         const toast = document.getElementById('update-toast');
         if (toast) toast.style.display = 'flex';
         document.getElementById('update-toast-later').onclick = () => {
@@ -3811,19 +3816,13 @@ async function checkForUpdates() {
         document.getElementById('update-toast-install').onclick = async () => {
           toast.style.display = 'none';
           try {
-            await performInstall(data.zipball_url);
+            await performInstall(zipUrl);
           } catch(e) {
-            state.ignoredUpdate = remoteVersion;
-            saveState({ scheduleBackup: false });
-            if (e.message !== 'Directory selection cancelled') {
-              const dl = document.getElementById('update-toast-download');
-              if (dl) {
-                dl.style.display = '';
-                dl.onclick = () => { dl.style.display = 'none'; window.open(data.html_url || repoUrl + '/releases/latest', '_blank'); };
-                if (msg) msg.textContent = 'Auto-install failed — download manually';
-                toast.style.display = 'flex';
-              }
-            }
+            if (e.message === 'Cancelled') { state.ignoredUpdate = remoteVersion; saveState({ scheduleBackup: false }); return; }
+            state.ignoredUpdate = remoteVersion; saveState({ scheduleBackup: false });
+            console.error('Install failed:', e);
+            const msg = document.getElementById('update-toast-msg');
+            if (msg) { msg.textContent = 'Failed: ' + e.message; toast.style.display = 'flex'; }
           }
         };
       }
