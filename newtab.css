@@ -819,6 +819,7 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow:0 3px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.10);
   transform:scale(var(--dial-icon-scale-local, var(--dial-icon-scale)));
   flex-shrink:0;
+  transition:transform .25s cubic-bezier(.22,1,.36,1), filter .25s ease;
 }
 .dial-win11-folder-icon::before {
   content:'';
@@ -828,6 +829,53 @@ input[type="range"]::-webkit-slider-thumb {
   background:linear-gradient(145deg,rgba(255,255,255,0.17),rgba(255,255,255,0.07));
   border-radius:5px 5px 0 0;
   box-shadow:inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+/* ── Windows 11 Glass style folder card ── */
+.dial-card.win11-folder-card {
+  clip-path: polygon(0 0, 35% 0, 42% 10%, 100% 10%, 100% 100%, 0 100%);
+  background: var(--surface);
+  border: none !important;
+  box-shadow: none !important;
+  filter: drop-shadow(0 8px 16px rgba(0,0,0,0.3));
+  transition: transform .35s cubic-bezier(.22,1,.36,1), filter .35s ease, background-color .24s ease;
+  overflow: visible;
+}
+.dial-card.win11-folder-card:not(.no-zoom):hover {
+  filter: drop-shadow(0 18px 38px rgba(0,0,0,0.45)) saturate(1.03);
+}
+.dial-card.win11-folder-card .dial-thumb {
+  background: transparent;
+}
+.dial-card.win11-folder-card.drag-over-folder {
+  background: rgba(255,255,255,0.08) !important;
+  filter: drop-shadow(0 18px 38px rgba(0,0,0,0.42));
+}
+
+/* SVG border outline that adapts perfectly to the folder shape */
+.dial-folder-svg-border {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+.dial-folder-svg-border path {
+  stroke: var(--border);
+  transition: stroke .24s ease;
+}
+.dial-card.win11-folder-card:not(.no-zoom):hover .dial-folder-svg-border path {
+  stroke: var(--border-hov);
+}
+.dial-card.win11-folder-card.drag-over-folder .dial-folder-svg-border path {
+  stroke: rgba(255,255,255,0.65);
+}
+.dial-card.win11-folder-card.no-border .dial-folder-svg-border {
+  display: none;
+}
+.dial-card:not(.no-zoom):hover .dial-win11-folder-icon {
+  transform: scale(calc(var(--dial-icon-scale-local, var(--dial-icon-scale)) * 1.06)) translateY(-2px);
+  filter: brightness(1.1) drop-shadow(0 4px 12px rgba(255,255,255,0.15));
 }
 .dial-letter {
   width:52px; height:52px; border-radius:12px;

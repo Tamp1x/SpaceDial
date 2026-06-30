@@ -1346,6 +1346,7 @@ function renderDials() {
   items.forEach((dial, i) => {
     const card = document.createElement('div');
     card.className = 'dial-card' + (dial.type === 'folder' ? ' dial-folder' : '') +
+      (dial.type === 'folder' && dial.win11FolderStyle ? ' win11-folder-card' : '') +
       (s.showBorder ? '' : ' no-border') +
       (s.glass ? '' : ' no-glass') +
       (s.hoverZoom ? '' : ' no-zoom');
@@ -1355,6 +1356,21 @@ function renderDials() {
     card.style.setProperty('--dial-icon-scale-local', `${iconScale / 100}`);
     card.dataset.id = dial.id;
     card.style.animationDelay = `${i * 0.03}s`;
+
+    if (dial.type === 'folder' && dial.win11FolderStyle) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'dial-folder-svg-border');
+      svg.setAttribute('viewBox', '0 0 100 100');
+      svg.setAttribute('preserveAspectRatio', 'none');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', 'M 0.5,0.5 L 35,0.5 L 42,10 L 99.5,10 L 99.5,99.5 L 0.5,99.5 Z');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', 'var(--border)');
+      path.setAttribute('stroke-width', '1');
+      path.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(path);
+      card.appendChild(svg);
+    }
 
     // Drag & drop for dials
     card.draggable = true;
@@ -1447,18 +1463,26 @@ function renderDials() {
     const thumb = document.createElement('div');
     thumb.className = 'dial-thumb';
 
-    const folderCoverIcon = getFolderCoverIcon(dial);
-    if (dial.type === 'folder' && folderCoverIcon) {
-      const img = document.createElement('img');
-      img.className = 'dial-thumb-img dial-thumb-custom-icon';
-      img.src = folderCoverIcon;
-      img.alt = '';
-      thumb.appendChild(img);
-    } else if (dial.type === 'folder' && !dial.customIcon) {
-      const ph = document.createElement('div');
-      ph.className = 'dial-thumb-placeholder dial-folder-thumb';
-      ph.innerHTML = '<div class="dial-win11-folder-icon"></div>';
-      thumb.appendChild(ph);
+    if (dial.type === 'folder') {
+      if (dial.win11FolderStyle) {
+        const icon = document.createElement('div');
+        icon.className = 'dial-win11-folder-icon';
+        thumb.appendChild(icon);
+      } else {
+        const folderCoverIcon = getFolderCoverIcon(dial);
+        if (folderCoverIcon) {
+          const img = document.createElement('img');
+          img.className = 'dial-thumb-img dial-thumb-custom-icon';
+          img.src = folderCoverIcon;
+          img.alt = '';
+          thumb.appendChild(img);
+        } else {
+          const ph = document.createElement('div');
+          ph.className = 'dial-thumb-placeholder dial-folder-thumb';
+          ph.innerHTML = '<div class="dial-win11-folder-icon"></div>';
+          thumb.appendChild(ph);
+        }
+      }
     } else if (dial.customIcon) {
       const img = document.createElement('img');
       img.className = 'dial-thumb-img dial-thumb-custom-icon';
@@ -1680,6 +1704,12 @@ function openDialModal(dialId, itemType = 'dial') {
   urlInput.style.display = editingItemType === 'folder' ? 'none' : '';
   const folderCoverArea = document.getElementById('folder-cover-area');
   const folderCoverSelect = document.getElementById('folder-cover-select');
+  const folderStyleArea = document.getElementById('folder-style-area');
+  const folderWin11StyleChk = document.getElementById('folder-win11-style-chk');
+  if (folderStyleArea && folderWin11StyleChk) {
+    folderStyleArea.style.display = editingItemType === 'folder' ? 'block' : 'none';
+    folderWin11StyleChk.checked = d ? !!d.win11FolderStyle : false;
+  }
   if (folderCoverArea && folderCoverSelect) {
     folderCoverArea.style.display = editingItemType === 'folder' && d ? 'block' : 'none';
     folderCoverSelect.innerHTML = '<option value="">Default folder icon</option>';
@@ -1730,6 +1760,7 @@ async function saveDialModal() {
 
   const iconSrc = document.querySelector('input[name="icon-src"]:checked').value;
   const coverDialId = document.getElementById('folder-cover-select')?.value || '';
+  const win11FolderStyle = document.getElementById('folder-win11-style-chk')?.checked || false;
   const existingDial = editingDialId ? findDial(editingDialId) : null;
   let customIcon = existingDial?.customIcon || null;
   let favicon = existingDial?.favIconUrl || existingDial?.favicon || null;
@@ -1761,11 +1792,14 @@ async function saveDialModal() {
         d.favIconUrl = favicon;
       }
       d.customIcon = customIcon;
-      if (editingItemType === 'folder') d.coverDialId = coverDialId;
+      if (editingItemType === 'folder') {
+        d.coverDialId = coverDialId;
+        d.win11FolderStyle = win11FolderStyle;
+      }
       d.iconScale = iconScale;
     }
   } else if (editingItemType === 'folder') {
-    activeDialList().push({ id: uid(), type: 'folder', name: name || 'Folder', customIcon, coverDialId: '', iconScale, dials: [] });
+    activeDialList().push({ id: uid(), type: 'folder', name: name || 'Folder', customIcon, coverDialId: '', iconScale, win11FolderStyle, dials: [] });
   } else {
     activeDialList().push({ id: uid(), type: 'dial', name: name || cleanHost(url), url, favicon, favIconUrl: favicon, customIcon, iconScale });
   }
@@ -1862,6 +1896,7 @@ function normalizeDial(input) {
       customIcon: input.customIcon || null,
       coverDialId: input.coverDialId || '',
       iconScale: Number.isFinite(iconScaleRaw) ? iconScaleRaw : 100,
+      win11FolderStyle: !!input.win11FolderStyle,
       dials: Array.isArray(input.dials) ? input.dials.map(item => normalizeDial(item)).filter(Boolean) : []
     };
   }
@@ -2301,6 +2336,7 @@ function cloudSerialize() {
         customIcon: item.customIcon && item.customIcon.length <= 1500 ? item.customIcon : null,
         coverDialId: item.coverDialId || '',
         iconScale: item.iconScale,
+        win11FolderStyle: !!item.win11FolderStyle,
         dials: (item.dials || []).map(serializeDialItem)
       }
     : {
