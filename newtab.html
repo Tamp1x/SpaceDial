@@ -433,24 +433,15 @@
       </div>
       <div class="s-section" data-section="updates">
         <div class="s-section-title">Updates</div>
-        <p style="color:var(--muted);font-size:12px;margin-bottom:10px">Select the folder where SpaceDial extension files are located to enable auto-install.</p>
-        <label class="field-label">Extension path</label>
-        <div style="display:flex;gap:6px">
-          <input type="text" id="s-update-path" class="field" style="flex:1;font-family:monospace;font-size:12px" placeholder="C:\Users\...\SpaceDial">
-          <button id="s-update-browse" class="btn-mini" title="Select folder" style="padding:6px 10px">📁</button>
-        </div>
-        <p style="font-size:11px;color:var(--muted);margin-top:6px">Path to the folder containing manifest.json. Selected path is saved with settings.</p>
-        <div style="margin-top:14px">
-          <button class="btn-secondary" id="s-check-update" style="width:100%">Check for updates</button>
-          <div id="s-update-status" style="font-size:12px;margin-top:8px;min-height:0;color:var(--muted);text-align:center"></div>
-        </div>
+        <p style="color:var(--muted);font-size:12px;margin-bottom:14px">New versions are published on GitHub. Check for updates or download the latest release manually.</p>
+        <button class="btn-secondary" id="s-check-update" style="width:100%">Check for updates</button>
+        <div id="s-update-status" style="font-size:12px;margin-top:8px;min-height:0;color:var(--muted);text-align:center"></div>
       </div>
     </div>
     </div>
     <div class="settings-footer">
       <span class="settings-version">v<!-- --></span>
       <div class="row-btns" style="margin-top:24px">
-      <button class="btn-mini" id="s-check-update-footer" style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase">Check updates</button>
       <button class="btn-secondary" id="s-cancel">Cancel</button>
       <button class="btn-primary" id="s-save">Save Settings</button>
       </div>
@@ -549,8 +540,7 @@
 <div id="update-toast" style="display:none">
   <span id="update-toast-msg">New version available</span>
   <button id="update-toast-later">Later</button>
-  <button id="update-toast-install">Install</button>
-  <button id="update-toast-download" style="display:none">Download .zip</button>
+  <button id="update-toast-download">Download</button>
 </div>
 
 <div id="speedtest-panel" style="display:none">
@@ -563,7 +553,6 @@
   <iframe id="ai-frame" title="SpaceDial AI Chat" loading="lazy"></iframe>
 </div>
 
-<script src="jszip.min.js"></script>
 <script src="newtab.js"></script>
 </body>
 </html>

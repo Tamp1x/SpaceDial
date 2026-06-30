@@ -45,8 +45,7 @@ const DEFAULT_STATE = () => ({
     autoplay: false,
     loopPlaylist: true,
     shuffleOnStart: false,
-    blockedDomains: 'youtube.com\ntiktok.com\ntwitter.com\nx.com\ninstagram.com\nfacebook.com\nreddit.com\nnetflix.com\ntwitch.tv\ntumblr.com\npinterest.com',
-    updatePath: ''
+    blockedDomains: 'youtube.com\ntiktok.com\ntwitter.com\nx.com\ninstagram.com\nfacebook.com\nreddit.com\nnetflix.com\ntwitch.tv\ntumblr.com\npinterest.com'
   },
   notes: '',
   player: {
@@ -2115,7 +2114,6 @@ function openSettings(triggerEl) {
   document.getElementById('s-loop').checked = s.loopPlaylist;
   document.getElementById('s-shuffle-start').checked = s.shuffleOnStart;
   document.getElementById('s-blocked-domains').value = s.blockedDomains || '';
-  document.getElementById('s-update-path').value = s.updatePath || '';
   chrome.storage.local.get('ai-funny-thinking', r => { document.getElementById('s-ai-funny').checked = !!r['ai-funny-thinking']; });
   switchSettingsSection('appearance');
   document.querySelector('.settings-version').textContent = 'v' + chrome.runtime.getManifest().version;
@@ -2174,7 +2172,6 @@ async function saveSettings() {
   s.loopPlaylist = document.getElementById('s-loop').checked;
   s.shuffleOnStart = document.getElementById('s-shuffle-start').checked;
   s.blockedDomains = document.getElementById('s-blocked-domains').value;
-  s.updatePath = document.getElementById('s-update-path').value.trim();
 
   saveState();
   applySettings();
@@ -3457,39 +3454,25 @@ function bindAll() {
     }
   });
   document.getElementById('s-reset').addEventListener('click', doReset);
-  async function runUpdateCheck(buttonId, statusId) {
-    const statusEl = document.getElementById(statusId);
-    if (!statusEl) return;
+  document.getElementById('s-check-update').addEventListener('click', async () => {
+    const statusEl = document.getElementById('s-update-status');
     statusEl.textContent = 'Checking...';
     statusEl.style.color = 'var(--muted)';
     try {
       const repoUrl = chrome.runtime.getManifest().homepage_url || 'https://github.com/Tamp1x/SpaceDial';
       const apiRepo = repoUrl.replace('https://github.com/', '').replace(/\/$/, '');
-      const zipUrl = `https://github.com/${apiRepo}/archive/refs/heads/master.zip`;
       const ac = new AbortController();
       const to = setTimeout(() => ac.abort(), 10000);
       const res = await fetch(`https://api.github.com/repos/${apiRepo}/releases/latest`, { signal: ac.signal });
       clearTimeout(to);
-      if (!res.ok) { statusEl.textContent = 'Failed to check (rate limit?)'; statusEl.style.color = 'var(--danger)'; return; }
+      if (!res.ok) { statusEl.textContent = 'Failed to check'; statusEl.style.color = 'var(--danger)'; return; }
       const data = await res.json();
       if (data.tag_name) {
         const remote = data.tag_name.replace(/^v/, '');
         const local = chrome.runtime.getManifest().version;
         if (remote !== local) {
-          statusEl.innerHTML = `Update ${data.tag_name} <button id="s-install-update" style="background:rgba(85,200,130,0.2);color:rgba(150,255,200,0.9);border:1px solid rgba(85,200,130,0.3);border-radius:6px;padding:2px 10px;cursor:pointer;font:inherit;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-left:6px">Install</button>`;
+          statusEl.innerHTML = `Update ${data.tag_name} — <a href="${data.html_url || repoUrl + '/releases/latest'}" target="_blank" style="color:var(--accent)">Download on GitHub</a>`;
           statusEl.style.color = 'var(--accent)';
-          setTimeout(() => {
-            const btn = document.getElementById('s-install-update');
-            if (btn) btn.onclick = async () => {
-              btn.disabled = true; btn.textContent = '…';
-              try {
-                await performInstall(zipUrl);
-              } catch(e) {
-                statusEl.textContent = e.message === 'Cancelled' ? 'Cancelled' : 'Failed: ' + e.message;
-                btn.disabled = false; btn.textContent = 'Install';
-              }
-            };
-          }, 0);
         } else {
           statusEl.textContent = `Up to date (${local})`;
           statusEl.style.color = 'rgba(100,255,130,0.6)';
@@ -3499,23 +3482,6 @@ function bindAll() {
       statusEl.textContent = 'Check failed';
       statusEl.style.color = 'var(--danger)';
     }
-  }
-  document.getElementById('s-check-update').addEventListener('click', () => runUpdateCheck('s-check-update', 's-update-status'));
-  document.getElementById('s-check-update-footer').addEventListener('click', () => runUpdateCheck('s-check-update-footer', 's-update-status'));
-  document.getElementById('s-update-browse').addEventListener('click', () => {
-    const inp = document.createElement('input');
-    inp.type = 'file';
-    inp.webkitdirectory = true;
-    inp.style.display = 'none';
-    document.body.appendChild(inp);
-    inp.addEventListener('change', () => {
-      if (inp.files.length) {
-        const f = inp.files[0];
-        document.getElementById('s-update-path').value = f.path ? f.path.substring(0, f.path.length - f.webkitRelativePath.length).replace(/\/$/, '') : f.webkitRelativePath.split('/')[0];
-      }
-      document.body.removeChild(inp);
-    });
-    inp.click();
   });
   document.getElementById('s-cloud-save').addEventListener('click', doCloudSave);
   document.getElementById('s-cloud-load').addEventListener('click', doCloudLoad);
@@ -3732,63 +3698,6 @@ function bindAll() {
   document.getElementById('tabs-scroll').addEventListener('scroll', updateTabsActivePill, { passive: true });
 }
 
-/* ─── Auto-update ──────────────────────────────── */
-async function performInstall(zipUrl) {
-  if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
-  const msg = document.getElementById('update-toast-msg') || document.getElementById('s-update-status');
-  if (msg) msg.textContent = 'Downloading…';
-  const resp = await fetch(zipUrl);
-  const blob = await resp.blob();
-  // Try File System Access API
-  if (typeof window.showDirectoryPicker === 'function') {
-    try {
-      const dir = await window.showDirectoryPicker({mode:'readwrite', id:'spacedial-update'});
-      if (msg) msg.textContent = 'Extracting…';
-      const zip = await JSZip.loadAsync(blob);
-      if (msg) msg.textContent = 'Writing files…';
-      const entries = Object.entries(zip.files).filter(([,e]) => !e.dir);
-      for (const [path, entry] of entries) {
-        try {
-          const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
-          parts.shift(); // strip 'SpaceDial-master' top-level dir
-          if (!parts.length) continue;
-          const name = parts.pop();
-          let d = dir;
-          for (const p of parts) d = await d.getDirectoryHandle(p, {create:true});
-          const fh = await d.getFileHandle(name, {create:true});
-          const ws = await fh.createWritable();
-          await ws.write(await entry.async('uint8array'));
-          await ws.close();
-        } catch(e) { console.warn('Skipped file:', path, e); }
-      }
-      if (msg) msg.textContent = 'Reloading…';
-      return setTimeout(() => chrome.runtime.reload(), 500);
-    } catch(e) {
-      if (e.name === 'AbortError') throw new Error('Cancelled');
-    }
-  }
-  // Fallback: download as SpaceDial-master.zip
-  if (msg) msg.textContent = 'Downloading SpaceDial-master.zip…';
-  const blobUrl = URL.createObjectURL(blob);
-  const dlFilename = 'SpaceDial-master.zip';
-  try {
-    await chrome.downloads.download({ url: blobUrl, filename: dlFilename, saveAs: true });
-  } catch {
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = dlFilename;
-    a.click();
-  }
-  const extPath = state.settings?.updatePath || 'your SpaceDial folder';
-  if (msg) {
-    msg.innerHTML = `Extract to <code style="font-size:11px;opacity:0.7">${extPath}</code> then press <button id="s-reload-ext" style="background:rgba(85,160,224,0.2);color:rgba(150,210,255,0.9);border:1px solid rgba(85,160,224,0.3);border-radius:6px;padding:2px 10px;cursor:pointer;font:inherit;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-left:4px">Reload</button>`;
-    setTimeout(() => {
-      const rb = document.getElementById('s-reload-ext');
-      if (rb) rb.onclick = () => chrome.runtime.reload();
-    }, 0);
-  }
-}
-
 async function checkForUpdates() {
   try {
     const repoUrl = chrome.runtime.getManifest().homepage_url || 'https://github.com/Tamp1x/SpaceDial';
@@ -3803,27 +3712,17 @@ async function checkForUpdates() {
       const remoteVersion = data.tag_name.replace(/^v/, '');
       const localVersion = chrome.runtime.getManifest().version;
       if (remoteVersion !== localVersion && remoteVersion !== state.ignoredUpdate) {
-        const zipUrl = `https://github.com/${apiRepo}/archive/refs/heads/master.zip`;
         const msg = document.getElementById('update-toast-msg');
         if (msg) msg.textContent = `Update ${data.tag_name}`;
+        document.getElementById('update-toast-download').onclick = () => {
+          window.open(data.html_url || repoUrl + '/releases/latest', '_blank');
+        };
         const toast = document.getElementById('update-toast');
         if (toast) toast.style.display = 'flex';
         document.getElementById('update-toast-later').onclick = () => {
           toast.style.display = 'none';
           state.ignoredUpdate = remoteVersion;
           saveState({ scheduleBackup: false });
-        };
-        document.getElementById('update-toast-install').onclick = async () => {
-          toast.style.display = 'none';
-          try {
-            await performInstall(zipUrl);
-          } catch(e) {
-            if (e.message === 'Cancelled') { state.ignoredUpdate = remoteVersion; saveState({ scheduleBackup: false }); return; }
-            state.ignoredUpdate = remoteVersion; saveState({ scheduleBackup: false });
-            console.error('Install failed:', e);
-            const msg = document.getElementById('update-toast-msg');
-            if (msg) { msg.textContent = 'Failed: ' + e.message; toast.style.display = 'flex'; }
-          }
         };
       }
     }
