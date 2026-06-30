@@ -805,23 +805,29 @@ input[type="range"]::-webkit-slider-thumb {
   transition:transform .2s ease;
 }
 .dial-favicon.custom { width:52px; height:52px; border-radius:14px; }
-.dial-folder .dial-thumb {
-  background:linear-gradient(135deg, rgba(255,255,255,0.07), rgba(255,255,255,0.015));
-}
+/* Folder card — rectangular card matching all dials. Folder visual only in thumbnail */
 .dial-folder-thumb {
   background:
     radial-gradient(circle at 50% 38%, rgba(255,255,255,0.12), transparent 44%),
     linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.015));
 }
-.dial-folder-icon {
+.dial-win11-folder-icon {
   position:relative;
-  z-index:1;
-  font-family:'Bebas Neue',sans-serif;
-  font-size:48px;
-  line-height:1;
-  color:rgba(255,255,255,0.72);
+  width:58px; height:42px;
+  background:linear-gradient(145deg,rgba(255,255,255,0.20),rgba(255,255,255,0.10));
+  border-radius:0 8px 8px 8px;
+  box-shadow:0 3px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.10);
   transform:scale(var(--dial-icon-scale-local, var(--dial-icon-scale)));
-  text-shadow:0 10px 30px rgba(0,0,0,0.35);
+  flex-shrink:0;
+}
+.dial-win11-folder-icon::before {
+  content:'';
+  position:absolute;
+  top:-9px; left:0;
+  width:22px; height:11px;
+  background:linear-gradient(145deg,rgba(255,255,255,0.17),rgba(255,255,255,0.07));
+  border-radius:5px 5px 0 0;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.08);
 }
 .dial-letter {
   width:52px; height:52px; border-radius:12px;
@@ -855,6 +861,22 @@ input[type="range"]::-webkit-slider-thumb {
   color:rgba(255,255,255,0.7); flex-shrink:0;
   transform:scale(var(--dial-icon-scale-local, var(--dial-icon-scale)));
   transition:transform .2s ease;
+}
+.dial-footer-folder-icon {
+  position:relative; flex-shrink:0;
+  width:16px; height:11px;
+  background:rgba(255,255,255,0.2);
+  border-radius:0 2px 3px 3px;
+  transform:scale(var(--dial-icon-scale-local, var(--dial-icon-scale)));
+  transition:transform .2s ease;
+}
+.dial-footer-folder-icon::before {
+  content:'';
+  position:absolute;
+  top:-3px; left:0;
+  width:7px; height:4px;
+  background:rgba(255,255,255,0.17);
+  border-radius:2px 2px 0 0;
 }
 .dial-label {
   font-family:'Rajdhani',sans-serif; font-size:12px; font-weight:700;

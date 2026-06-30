@@ -1457,7 +1457,7 @@ function renderDials() {
     } else if (dial.type === 'folder' && !dial.customIcon) {
       const ph = document.createElement('div');
       ph.className = 'dial-thumb-placeholder dial-folder-thumb';
-      ph.innerHTML = '<div class="dial-folder-icon">▦</div>';
+      ph.innerHTML = '<div class="dial-win11-folder-icon"></div>';
       thumb.appendChild(ph);
     } else if (dial.customIcon) {
       const img = document.createElement('img');
@@ -1516,8 +1516,7 @@ function renderDials() {
         footer.appendChild(fi);
       } else if (dial.type === 'folder' && s.showFavicon && !dial.customIcon) {
         const fl = document.createElement('div');
-        fl.className = 'dial-footer-icon-letter';
-        fl.textContent = '▦';
+        fl.className = 'dial-footer-folder-icon';
         footer.appendChild(fl);
       } else if (s.showFavicon && dialFavicon && !dial.customIcon) {
         const fi = document.createElement('img');
