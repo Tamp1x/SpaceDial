@@ -1,83 +1,70 @@
 # SpaceDial
 
-> Space-inspired speed dial new tab for Chrome — with AI assistant, groups, widgets, music, notes, and focus mode.
+> Space-inspired speed dial new tab for Chrome — with AI assistant, groups, folders, widgets, music, notes, focus mode, and speed test.
 
 ![SpaceDial](icons/icon128.png)
 
 ---
 
-## Overview
-
-SpaceDial replaces your browser's new tab page with a fully-featured, space-themed start screen. Every element is designed to stay out of your way until you need it, while giving you fast access to your most-used sites, a built-in AI chat assistant, live clock and weather, music player, scratchpad, and focus timer.
-
----
-
 ## Features
+
+### Speed Dials
+- Organise bookmarks into named **groups** (tabs across the top)
+- **Folders** inside groups — Android-style preview grid (up to 4 dial previews) with optional **cover icon** override
+- **Live drag & drop** — animated reorder with FLIP transitions, auto-switch tabs on hover, drop indicator
+- Drag dials between groups or into/out of folders
+- Choose dial shape: wide (16:9), square (1:1), or tall (3:4)
+- Custom icon support — search DuckDuckGo/Google or paste any URL
+- Favicon auto-fetch with fallback letter avatar
+- Right-click context menu: edit, move, delete
 
 ### AI Chat Assistant
 - Built-in AI chat panel that opens alongside your dials
 - **OpenAI-compatible API** (connect to Zen API or any compatible endpoint)
 - **Encrypted API key** storage (AES-GCM 256-bit via Web Crypto API)
-- **Model selector** with 49+ models grouped by family, capability icons (T / 🖼)
-- **Model visibility** settings — hide unused models from the dropdown
-- **Streaming responses** rendered live with markdown and code blocks
+- **Model selector** with 49+ models grouped by family, capability icons (T / 🖼), model visibility settings
+- **Streaming responses** with markdown, code blocks with copy button, and HTML preview (sandboxed iframe)
 - **10 built-in tools**: web search, manage dials/folders/settings, open URLs
 - **Multi-turn tool calling** with confirmation popup for destructive actions
-- **File attachments** via drag & drop, file picker, or clipboard paste
+- **File attachments** via drag & drop, file picker, or clipboard paste (images rendered inline)
 - **Auto-naming** of chats from the first AI response
-- **Chat history** with sidebar, delete, and per-chat model memory
-- **Auto-switch** active chat when typing while viewing a past conversation
-- **Funny loading phrases** toggle replaces "Thinking" with random phrases
-- **Code block rendering** with copy button and HTML preview (sandboxed iframe)
-- **HTML preview** with automatic document wrapping for partial snippets
-- **Grouped chat history** by model family in sidebar
-
-### Speed Dials
-- Organise bookmarks into named **groups** (tabs across the top)
-- **Live drag & drop** — animated reorder with FLIP transitions
-- Drop indicator shows exactly where the dial will land
-- **Auto-switch tabs** when dragging a dial over a tab for 600ms
-- Drag dials between groups or into folders
-- Choose dial shape: wide cards or compact squares
-- Custom icon support — search DuckDuckGo/Google or paste any URL
-- Favicon auto-fetch with fallback letter avatar
-- **Windows 11-style folder icons** with CSS-drawn folder shape
-- Right-click context menu: edit, move, delete
+- **Chat history** with sidebar, delete, per-chat model memory, and grouped history by model family
+- **Funny loading phrases** toggle
+- **Auto-cleanup** of empty chats when switching away
 
 ### Widgets
 | Widget | Details |
 |---|---|
 | **Clock** | Live 12/24h clock with animated character transitions |
-| **Weather** | Current conditions + up to 7-day forecast via Open-Meteo (no API key) |
+| **Weather** | Current conditions + up to 7/16-day forecast via Open-Meteo (no API key) |
 | **Notes** | Full-page scratchpad, auto-saved to storage |
 | **Music Player** | Local file playlist — add, reorder, shuffle, repeat, seek |
+| **Speed Test** | Built-in browser-based speed test (Ookla or internal) |
 
 ### Focus Mode
 - Set a named session with a custom duration
 - Choose which dial groups and domains to block
 - **Hard block** option disables the "wait and go back" escape hatch
-- Blocked sites redirect to a countdown page with the session name and remaining time
+- Blocked sites redirect to a countdown page with session name and remaining time
 - Session persists across browser restarts via `session` storage
 
 ### Appearance
-- Animated Night background plus Sunrise, Day, and Sunset atmosphere modes
+- Animated Night, Sunrise, Day, Sunset atmosphere modes + solid colour
 - Optional automatic day/night switching via Open-Meteo sunrise/sunset data
-- Manual or automatic weather effects: clouds, rain, snow, and fog
-- Optional solid colour background with overlay opacity control
-- Glassmorphism card style (toggleable)
-- Adjustable column count and dial icon scale
-- Border visibility toggle
-- Hover zoom effect on dials
+- Weather effects: clouds, rain, snow, fog (manual or auto)
+- Glassmorphism card style, hover zoom, border visibility, adjustable columns and icon scale
+- Show/hide top bar buttons (add group, focus mode, speed test, AI)
 
-### Import / Export
-- Export the full state as a JSON backup file
-- Import native SpaceDial backups
-- Import **FVD Speed Dial** backups (auto-detected)
-- Auto-backup prompt — triggers when the state changes significantly and reminds you to save
+### Updates
+- Automatic check for new versions on startup
+- Toast notification when update is available — Later (dismiss) or Download (opens GitHub releases)
+- Settings **Updates** tab shows current version and a manual check button
 
-### Cloud Sync
-- Optional sync via `chrome.storage.sync` (toggle in settings)
-- Falls back to `chrome.storage.local` when sync quota is exceeded
+### Backup & Sync
+- Export minimal (dials + settings) or full (everything) JSON backup
+- Import SpaceDial or FVD Speed Dial backups
+- Auto-backup prompt on significant state changes
+- Optional Chrome Cloud sync (`chrome.storage.sync`)
 
 ---
 
@@ -86,7 +73,7 @@ SpaceDial replaces your browser's new tab page with a fully-featured, space-them
 ### Chrome / Chromium (unpacked)
 1. Clone or download this repository.
 2. Open `chrome://extensions` and enable **Developer mode**.
-3. Click **Load unpacked** and select the extension folder.
+3. Click **Load unpacked** and select the `SpaceDial` folder.
 4. Open a new tab — SpaceDial loads automatically.
 
 ---
@@ -94,17 +81,20 @@ SpaceDial replaces your browser's new tab page with a fully-featured, space-them
 ## File Structure
 
 ```
-spacedial/
-├── manifest.json       # Extension manifest (MV3, v4.5.0)
-├── newtab.html         # Main new tab page
-├── newtab.js           # All UI logic + AI settings
-├── newtab.css          # All styles
-├── ai.html             # AI chat panel UI
-├── ai.js               # AI chat logic — streaming, tools, encryption
-├── ai.css              # AI panel styles
-├── background.js       # Service worker — focus blocking, notifications
-├── blocked.html        # Focus mode block page
-├── blocked.js          # Block page countdown logic
+SpaceDial/
+├── manifest.json          # Extension manifest (MV3, v4.7.0)
+├── newtab.html            # Main new tab page
+├── newtab.js              # All UI logic + settings
+├── newtab.css             # All styles
+├── ai.html                # AI chat panel (loaded in iframe)
+├── ai.js                  # AI chat logic — streaming, tools, encryption
+├── ai.css                 # AI panel styles
+├── background.js          # Service worker — focus blocking, notifications
+├── blocked.html           # Focus mode block page
+├── blocked.js             # Block page countdown logic
+├── speedtest.html         # Internal speed test panel
+├── speedtest.js           # Speed test logic
+├── manifest.json
 └── icons/
     ├── icon16.png
     ├── icon32.png
@@ -118,58 +108,59 @@ spacedial/
 
 | Permission | Why |
 |---|---|
-| `storage` | Save dials, settings, notes, player state, and AI data |
+| `storage` | Save dials, settings, notes, player state, AI data |
 | `tabs` | Detect navigation for focus mode site blocking |
 | `notifications` | Notify when music is playing in a background tab |
 | `downloads` | Export backup JSON files |
-| `host_permissions: *://*/*` | Required for focus-mode URL interception across all sites |
-| `api.open-meteo.com` | Weather data (no account needed) |
+| `host_permissions: *://*/*` | Required for focus-mode URL interception |
+| `api.open-meteo.com` | Weather data (no API key needed) |
 
 ---
 
 ## Settings Reference
 
-Settings are organised into **Appearance**, **Behaviour**, **Focus**, and **AI** tabs inside the extension.
+Settings are organised into **Appearance**, **Dials**, **Widgets**, **Music & Focus**, **AI**, **Backup**, and **Updates** tabs.
 
 | Setting | Tab | Default | Description |
 |---|---|---|---|
-| Background type | Appearance | Night | `night`, `sunrise`, `day`, `sunset`, or `solid` |
-| Auto day/night | Appearance | Off | Uses Open-Meteo sunrise/sunset data |
-| Weather effect | Appearance | Clear | `clear`, `cloudy`, `rain`, `snow`, or `fog` |
+| Background type | Appearance | Night | `night`, `sunrise`, `day`, `sunset`, `solid` |
+| Solid colour | Appearance | #07070e | Background when type is `solid` |
+| Auto day/night | Appearance | Off | Uses Open-Meteo sunrise/sunset |
+| Weather effect | Appearance | Clear | `clear`, `cloudy`, `rain`, `snow`, `fog` |
 | Auto weather | Appearance | Off | Uses Open-Meteo current weather |
-| Solid colour picker | Appearance | #07070e | Background colour when type is `solid` |
-| Overlay opacity | Appearance | 0.35 | Translucency of the background overlay |
-| Columns | Appearance | 5 | Number of dial columns |
-| Dial shape | Appearance | Wide | `wide` or `square` |
-| Show labels | Appearance | On | Show/hide dial name labels |
-| Show favicons | Appearance | On | Show/hide favicon images |
-| Show footer | Appearance | On | Show/hide the bottom info bar on dials |
-| Hover zoom | Appearance | On | Dial zoom effect on hover |
-| Glass effect | Appearance | On | Glassmorphism card style |
-| Dial border | Appearance | On | Show/hide dial card borders |
-| Dial icon scale | Appearance | 100 | Icon size percentage (50–200) |
-| Show add button | Appearance | On | Show/hide the "+" add dial card |
-| Clock format | Behaviour | 24h | 12h or 24h |
-| Weather city | Behaviour | Dublin | Any city name |
-| Temperature unit | Behaviour | Celsius | Celsius or Fahrenheit |
-| Show weather | Behaviour | On | Show/hide the weather widget |
-| Show clock | Behaviour | On | Show/hide the clock widget |
-| Show notes | Behaviour | Off | Show/hide the notes widget |
-| Show music player | Behaviour | Off | Show/hide the music player |
-| Music on tab leave | Behaviour | Stop | Stop, pause, or continue playing |
-| Show AI button | AI | On | Show/hide the AI button in the top bar |
-| Funny loading phrases | AI | Off | Random phrases instead of "Thinking" |
-| Hard block | Focus | Off | Disables bypass on the block page |
+| Overlay opacity | Appearance | 0.35 | Vignette darkness |
+| SpeedTest mode | Appearance | Ookla | `ookla` or `internal` |
+| Show/hide top bar buttons | Appearance | On | Add group, Focus, SpeedTest, AI |
+| Columns | Dials | 5 | 2–7 |
+| Dial shape | Dials | Wide | `wide`, `square`, `tall` |
+| Dial icon scale | Dials | 100 | 0–200% |
+| Show labels | Dials | On | |
+| Show favicons | Dials | On | |
+| Show footer | Dials | On | Bottom info bar |
+| Hover zoom | Dials | On | |
+| Glass effect | Dials | On | Glassmorphism cards |
+| Dial border | Dials | On | |
+| Show ADD DIAL | Dials | On | "+" card |
+| Clock format | Widgets | 24h | 12h or 24h |
+| Show seconds | Widgets | Off | |
+| Weather city | Widgets | Dublin | Any city name |
+| Forecast range | Widgets | 7 | 7 or 16 days |
+| Temperature unit | Widgets | Celsius | Celsius or Fahrenheit |
+| Show clock/weather/notes/music | Widgets | On/Off | Per-widget toggle |
+| Music on tab leave | Music | Stop | Stop, continue, or ask |
+| Autoplay / Loop / Shuffle | Music | Off/On/Off | |
+| Blocked domains | Music & Focus | list | One per line |
+| Show AI button | AI | On | |
+| Funny loading phrases | AI | Off | Random phrases |
+| API key | AI | — | Encrypted AES-GCM |
 
 ---
 
 ## AI Configuration
 
-SpaceDial includes a built-in AI chat panel that connects to any OpenAI-compatible API endpoint:
-
 1. Click the **AI** button in the top bar to open the chat panel
-2. Enter your API key when prompted (stored encrypted via AES-GCM)
-3. Select a model from the dropdown (49+ models available)
+2. Enter your API key when prompted (encrypted via AES-GCM)
+3. Select a model from the dropdown
 4. Start chatting — the AI can search the web and manage your dials
 
 **Default endpoint:** `https://opencode.ai/zen/v1/chat/completions`
@@ -177,11 +168,8 @@ SpaceDial includes a built-in AI chat panel that connects to any OpenAI-compatib
 ### Available Tools
 - `web_search` — Search the web via DuckDuckGo
 - `get_dials` — List all dials and folders
-- `create_dial` — Create a new speed dial
-- `update_dial` — Modify an existing dial
-- `delete_dial` — Remove a dial
-- `create_folder` — Create a new folder
-- `move_dial_to_folder` — Move a dial into a folder
+- `create_dial`, `update_dial`, `delete_dial`
+- `create_folder`, `move_dial_to_folder`
 - `change_setting` — Modify any extension setting
 - `open_url` — Open a URL in a new tab
 
@@ -191,13 +179,13 @@ Destructive tools show a confirmation popup before execution.
 
 ## Keyboard Shortcuts
 
-There are no global keyboard shortcuts defined. All interaction is mouse-driven. The notes widget supports standard textarea shortcuts.
+No global shortcuts defined. All interaction is mouse-driven.
 
 ---
 
 ## Data & Privacy
 
-SpaceDial stores everything locally in `chrome.storage.local` by default. No data is sent to any external server. Weather requests go directly to the [Open-Meteo](https://open-meteo.com/) public API using only the city name you provide. Favicon lookups use the `favicone.com` proxy or DuckDuckGo's favicon service. AI chat history is stored in `localStorage` and is never sent anywhere except the API endpoint you configure.
+Everything is stored locally in `chrome.storage.local` by default. No data is sent to external servers. Weather requests go directly to the [Open-Meteo](https://open-meteo.com/) public API. Favicon lookups use DuckDuckGo's favicon service. AI chat history is stored in `localStorage` and sent only to the API endpoint you configure.
 
 ---
 
@@ -207,21 +195,21 @@ SpaceDial stores everything locally in `chrome.storage.local` by default. No dat
 |---|---|
 | Chrome 114+ | ✅ Full support |
 | Edge (Chromium) | ✅ Full support |
-| Firefox 120+ | ⚠️ Mostly works — `chrome.storage.session` and some MV3 APIs may behave differently |
+| Firefox 120+ | ⚠️ Mostly works — some MV3 APIs may differ |
 | Safari | ❌ Not supported |
 
 ---
 
 ## Development Notes
 
-- The extension uses **Manifest V3** with a service worker (`background.js`).
+- **Manifest V3** with a service worker (`background.js`).
 - State is a single serialisable object managed by `loadState` / `saveState`.
-- Focus session state uses `chrome.storage.session` so it survives service worker restarts but is cleared when the browser closes.
-- The music player is a plain `<audio>` element; files are stored as base64 blobs in local storage.
-- Auto-backup uses a debounce + fingerprint comparison to avoid prompting on trivial changes.
-- AI chat uses a ReadableStream-based SSE parser for streaming responses.
+- Focus session uses `chrome.storage.session` (cleared on browser close).
+- Music player is a plain `<audio>` element; files stored as base64 blobs.
+- AI chat uses ReadableStream-based SSE parser for streaming responses.
 - Drag and drop uses FLIP animation for smooth dial reordering.
-- Folder icons are pure CSS — no image assets needed.
+- Folder preview grid is pure CSS flexbox; no image assets needed.
+- Version is read live from `manifest.json` via `fetch` (not cached `chrome.runtime.getManifest`).
 
 ---
 

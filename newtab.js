@@ -2116,7 +2116,7 @@ function openSettings(triggerEl) {
   document.getElementById('s-blocked-domains').value = s.blockedDomains || '';
   chrome.storage.local.get('ai-funny-thinking', r => { document.getElementById('s-ai-funny').checked = !!r['ai-funny-thinking']; });
   switchSettingsSection('appearance');
-  document.querySelector('.settings-version').textContent = 'v' + chrome.runtime.getManifest().version;
+  getLiveVersion().then(v => { document.querySelector('.settings-version').textContent = 'v' + v; });
   loadAiApiKey().then(key => {
     document.getElementById('s-ai-key').value = key ? '••••••••••••••••' : '';
     document.getElementById('s-ai-key').dataset.hasKey = key ? '1' : '0';
@@ -3469,7 +3469,7 @@ function bindAll() {
       const data = await res.json();
       if (data.tag_name) {
         const remote = data.tag_name.replace(/^v/, '');
-        const local = chrome.runtime.getManifest().version;
+        const local = await getLiveVersion();
         if (remote !== local) {
           statusEl.innerHTML = `Update ${data.tag_name} — <a href="${data.html_url || repoUrl + '/releases/latest'}" target="_blank" style="color:var(--accent)">Download on GitHub</a>`;
           statusEl.style.color = 'var(--accent)';
@@ -3698,6 +3698,13 @@ function bindAll() {
   document.getElementById('tabs-scroll').addEventListener('scroll', updateTabsActivePill, { passive: true });
 }
 
+async function getLiveVersion() {
+  try {
+    const r = await fetch(chrome.runtime.getURL('manifest.json'));
+    const m = await r.json();
+    return m.version || chrome.runtime.getManifest().version;
+  } catch { return chrome.runtime.getManifest().version; }
+}
 async function checkForUpdates() {
   try {
     const repoUrl = chrome.runtime.getManifest().homepage_url || 'https://github.com/Tamp1x/SpaceDial';
@@ -3710,7 +3717,7 @@ async function checkForUpdates() {
     const data = await res.json();
     if (data.tag_name) {
       const remoteVersion = data.tag_name.replace(/^v/, '');
-      const localVersion = chrome.runtime.getManifest().version;
+      const localVersion = await getLiveVersion();
       if (remoteVersion !== localVersion && remoteVersion !== state.ignoredUpdate) {
         const msg = document.getElementById('update-toast-msg');
         if (msg) msg.textContent = `Update ${data.tag_name}`;
