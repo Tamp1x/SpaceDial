@@ -3471,8 +3471,24 @@ function bindAll() {
         const remote = data.tag_name.replace(/^v/, '');
         const local = chrome.runtime.getManifest().version;
         if (remote !== local) {
-          statusEl.innerHTML = `Update available: ${data.tag_name} <a href="${data.html_url || repoUrl + '/releases/latest'}" target="_blank" style="color:var(--accent)">Download</a>`;
+          statusEl.innerHTML = `Update available: ${data.tag_name} <button id="s-install-update" style="background:rgba(85,200,130,0.2);color:rgba(150,255,200,0.9);border:1px solid rgba(85,200,130,0.3);border-radius:6px;padding:2px 10px;cursor:pointer;font:inherit;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;margin-left:6px">Install</button> <a href="${data.html_url || repoUrl + '/releases/latest'}" target="_blank" style="color:var(--muted);font-size:11px;margin-left:4px">zip</a>`;
           statusEl.style.color = 'var(--accent)';
+          setTimeout(() => {
+            const btn = document.getElementById('s-install-update');
+            if (btn) btn.onclick = async () => {
+              btn.disabled = true; btn.textContent = '…';
+              try {
+                await performInstall(data.zipball_url);
+              } catch(e) {
+                if (e.message !== 'Directory selection cancelled') {
+                  statusEl.textContent = 'Install failed — download zip manually';
+                } else {
+                  statusEl.textContent = 'Cancelled';
+                }
+                btn.disabled = false; btn.textContent = 'Install';
+              }
+            };
+          }, 0);
         } else {
           statusEl.textContent = `Up to date (${local})`;
           statusEl.style.color = 'rgba(100,255,130,0.6)';
@@ -3698,6 +3714,77 @@ function bindAll() {
   document.getElementById('tabs-scroll').addEventListener('scroll', updateTabsActivePill, { passive: true });
 }
 
+/* ─── Auto-update via File System Access API ──── */
+const UPDATE_DB = 'spacedial-update-dir';
+async function getDirHandle() {
+  return new Promise(resolve => {
+    const r = indexedDB.open(UPDATE_DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('h');
+    r.onsuccess = () => {
+      const t = r.result.transaction('h', 'readonly');
+      const g = t.objectStore('h').get('dir');
+      g.onsuccess = async () => {
+        let h = g.result;
+        if (h) {
+          try { if ((await h.requestPermission({mode:'readwrite'})) === 'granted') { resolve(h); return; } } catch {}
+        }
+        resolve(null);
+      };
+      g.onerror = () => resolve(null);
+    };
+    r.onerror = () => resolve(null);
+  });
+}
+async function saveDirHandle(h) {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open(UPDATE_DB, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('h');
+    r.onsuccess = () => {
+      const t = r.result.transaction('h', 'readwrite');
+      t.objectStore('h').put(h, 'dir');
+      t.oncomplete = resolve;
+    };
+  });
+}
+async function writeFilesToDir(rootDir, zip) {
+  const entries = Object.entries(zip.files).filter(([,e]) => !e.dir);
+  for (const [path, entry] of entries) {
+    try {
+      const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+      parts.shift(); // strip GitHub's top-level dir (repo-hash)
+      if (!parts.length) continue;
+      const name = parts.pop();
+      let dir = rootDir;
+      for (const p of parts) dir = await dir.getDirectoryHandle(p, {create:true});
+      const fh = await dir.getFileHandle(name, {create:true});
+      const ws = await fh.createWritable();
+      const buf = await entry.async('uint8array');
+      await ws.write(buf);
+      await ws.close();
+    } catch(e) { console.warn('Skipped file:', path, e); }
+  }
+}
+async function performInstall(zipUrl) {
+  if (typeof JSZip === 'undefined') throw new Error('JSZip library not loaded');
+  let dir = await getDirHandle();
+  if (!dir) {
+    try {
+      dir = await window.showDirectoryPicker({mode:'readwrite', id:'spacedial-update'});
+      await saveDirHandle(dir);
+    } catch { throw new Error('Directory selection cancelled'); }
+  }
+  const msg = document.getElementById('update-toast-msg') || document.getElementById('s-update-status');
+  if (msg) msg.textContent = 'Downloading…';
+  const resp = await fetch(zipUrl);
+  const blob = await resp.blob();
+  if (msg) msg.textContent = 'Extracting…';
+  const zip = await JSZip.loadAsync(blob);
+  if (msg) msg.textContent = 'Writing files…';
+  await writeFilesToDir(dir, zip);
+  if (msg) msg.textContent = 'Reloading…';
+  setTimeout(() => chrome.runtime.reload(), 500);
+}
+
 async function checkForUpdates() {
   try {
     const repoUrl = chrome.runtime.getManifest().homepage_url || 'https://github.com/Tamp1x/SpaceDial';
@@ -3721,11 +3808,23 @@ async function checkForUpdates() {
           state.ignoredUpdate = remoteVersion;
           saveState({ scheduleBackup: false });
         };
-        document.getElementById('update-toast-download').onclick = () => {
+        document.getElementById('update-toast-install').onclick = async () => {
           toast.style.display = 'none';
-          pendingBackupSnapshot = buildExportableState(state);
-          saveBackupToFile();
-          window.open(data.html_url || repoUrl + '/releases/latest', '_blank');
+          try {
+            await performInstall(data.zipball_url);
+          } catch(e) {
+            state.ignoredUpdate = remoteVersion;
+            saveState({ scheduleBackup: false });
+            if (e.message !== 'Directory selection cancelled') {
+              const dl = document.getElementById('update-toast-download');
+              if (dl) {
+                dl.style.display = '';
+                dl.onclick = () => { dl.style.display = 'none'; window.open(data.html_url || repoUrl + '/releases/latest', '_blank'); };
+                if (msg) msg.textContent = 'Auto-install failed — download manually';
+                toast.style.display = 'flex';
+              }
+            }
+          }
         };
       }
     }

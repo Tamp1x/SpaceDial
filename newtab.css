@@ -1497,5 +1497,7 @@ textarea.field { font-size:14px; }
 #update-toast { position:fixed; right:18px; bottom:18px; z-index:820; background:var(--panel-bg); border:1px solid rgba(255,255,255,0.16); border-radius:10px; padding:10px 12px; display:flex; align-items:center; gap:8px; font-family:'Rajdhani',sans-serif; font-size:13px; color:rgba(255,255,255,0.9); box-shadow:0 8px 26px rgba(0,0,0,0.45); backdrop-filter:blur(6px); }
 #update-toast button { font-family:'Rajdhani',sans-serif; font-size:11px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; padding:5px 12px; border-radius:6px; cursor:pointer; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); color:rgba(255,255,255,0.6); transition:all .15s; }
 #update-toast button:hover { background:rgba(255,255,255,0.15); color:#fff; }
+#update-toast-install { background:rgba(85,200,130,0.15); border-color:rgba(85,200,130,0.3); color:rgba(150,255,200,0.9); }
+#update-toast-install:hover { background:rgba(85,200,130,0.25); color:#fff; }
 #update-toast-download { background:rgba(85,160,224,0.15); border-color:rgba(85,160,224,0.3); color:rgba(150,210,255,0.9); }
 #update-toast-download:hover { background:rgba(85,160,224,0.25); color:#fff; }
