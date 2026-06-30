@@ -1,5 +1,5 @@
 /* ============================================================
-   DialSpace v4 — Main Logic
+   SpaceDial v4 — Main Logic
    ============================================================ */
 
 // ─── Default state ─────────────────────────────────────────
@@ -38,28 +38,10 @@ const DEFAULT_STATE = () => ({
     showNotes: true,
     speedTestMode: 'ookla',
     musicLeave: 'stop',
-    weatherCity: 'Dublin',
-    tempUnit: 'celsius',
-    cols: 5,
-    dialShape: 'wide',
-    showLabel: true,
-    showFavicon: true,
-    showFooter: true,
-    hoverZoom: true,
-    glass: true,
-    showBorder: true,
-    dialIconScale: 100,
-    showAddDialButton: true,
-    showClock: true,
-    use24h: true,
-    showSeconds: false,
-    showWeather: true,
-    showWeatherForecast: true,
-    weatherForecastDays: 7,
-    showPlayer: true,
-    showNotes: true,
-    speedTestMode: 'ookla',
-    musicLeave: 'stop',
+    showAddTabButton: true,
+    showFocusButton: true,
+    showSpeedTestButton: true,
+    showAiButton: true,
     autoplay: false,
     loopPlaylist: true,
     shuffleOnStart: false,
@@ -82,12 +64,14 @@ const DEFAULT_STATE = () => ({
 let state = DEFAULT_STATE();
 let ctxDialId = null;
 let editingDialId = null;
+let editingItemType = 'dial';
 let editingTabId = null;
 let selectedIconUrl = null;
 let iconSearchSource = 'duckduckgo';
 let focusSession = null; // { endTime, blockedGroups, blockedDomains, name, hardBlock, showTimer, intervalId }
 let lastClockText = '';
 let viewTransitionTimer = null;
+let folderStack = [];
 
 function getIconScale(value, fallback = 100) {
   const scale = Number(value);
@@ -114,6 +98,9 @@ let draggingTabId = null;
 let isSelectingCtxText = false;
 const DIAL_DRAG_MIME = 'application/x-dialspace-dial';
 const TAB_DRAG_MIME = 'application/x-dialspace-tab';
+let dragHoverTimer = null;
+let dragHoverTabId = null;
+let dragDropIndicator = null;
 
 // ─── Notes debounce ────────────────────────────────────────
 let notesSaveTimer = null;
@@ -146,7 +133,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.fonts?.ready?.then(() => {
     requestAnimationFrame(() => requestAnimationFrame(updateTabsActivePill));
   });
+  setTimeout(() => {
+    if (!document.fonts?.check?.('1em Anurati')) {
+      document.documentElement.classList.add('fonts-loaded');
+    }
+  }, 4000);
   checkForUpdates();
+
+  // Listen for AI tool state changes from the AI panel iframe
+  window.addEventListener('message', async (e) => {
+    if (e.data?.type === 'spacedial-state-changed') {
+      await loadState();
+      applySettings(true);
+      buildTabs();
+      showView(state.activeGroup);
+      renderDials();
+      fetchWeather();
+      updateTabsActivePill();
+    }
+  });
 });
 
 // ─── Persistence ────────────────────────────────────────────
@@ -160,7 +165,7 @@ function saveState(options = {}) {
   })).filter(t => t.type === 'url' || t.src);
   chrome.storage.local.set({ ds2: s }, () => {
     if (!chrome.runtime.lastError) return;
-    console.warn('DialSpace storage save failed:', chrome.runtime.lastError.message);
+    console.warn('SpaceDial storage save failed:', chrome.runtime.lastError.message);
   });
   if (scheduleBackup) scheduleBackupPrompt(s);
 }
@@ -394,6 +399,10 @@ function applySettings(initial) {
   document.getElementById('notes-block').style.display = s.showNotes ? '' : 'none';
   const addDialCard = document.querySelector('#dials-grid .dial-add');
   if (addDialCard) addDialCard.style.display = s.showAddDialButton ? '' : 'none';
+  document.getElementById('add-tab-btn').style.display = s.showAddTabButton ? '' : 'none';
+  document.getElementById('focus-btn').style.display = s.showFocusButton ? '' : 'none';
+  document.getElementById('speedtest-btn').style.display = s.showSpeedTestButton ? '' : 'none';
+  document.getElementById('ai-btn').style.display = s.showAiButton ? '' : 'none';
 
   // Player state
   document.getElementById('btn-shuffle').classList.toggle('on', state.player.shuffle);
@@ -859,10 +868,13 @@ function updateClock() {
 async function fetchWeather() {
   if (!state.settings.showWeather && !state.settings.autoDayNight && !state.settings.autoWeather) return;
   const city = state.settings.weatherCity || 'Dublin';
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), 12000);
+  const sig = ac.signal;
   try {
-    const geo = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`);
+    const geo = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`, { signal: sig });
     const gd = await geo.json();
-    if (!gd.results?.length) return;
+    if (!gd.results?.length) { clearTimeout(to); return; }
     const { latitude: lat, longitude: lon, name, country } = gd.results[0];
     const unit = state.settings.tempUnit === 'fahrenheit' ? 'fahrenheit' : 'celsius';
     const forecastDays = state.settings.showWeatherForecast ? normalizeForecastDays(state.settings.weatherForecastDays) : 1;
@@ -870,8 +882,9 @@ async function fetchWeather() {
       ? 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset'
       : 'sunrise,sunset';
     const currentParams = 'temperature_2m,weather_code,is_day,precipitation,rain,snowfall,cloud_cover,relative_humidity_2m,visibility';
-    const wx = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=${currentParams}&daily=${dailyParams}&temperature_unit=${unit}&forecast_days=${forecastDays}&timezone=auto`);
+    const wx = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=${currentParams}&daily=${dailyParams}&temperature_unit=${unit}&forecast_days=${forecastDays}&timezone=auto`, { signal: sig });
     const wd = await wx.json();
+    clearTimeout(to);
     const temp = Math.round(wd.current.temperature_2m);
     const code = Number(wd.current.weather_code ?? wd.current.weathercode ?? 0);
     const isNight = Number(wd.current?.is_day) === 0;
@@ -883,6 +896,7 @@ async function fetchWeather() {
       renderWeatherForecast(wd.daily, unit);
     }
   } catch(e) {
+    clearTimeout(to);
     lastWeatherAtmosphere = null;
     state.lastWeatherAtmosphere = null;
     saveState({ scheduleBackup: false });
@@ -1052,17 +1066,35 @@ function buildTabs() {
         e.preventDefault();
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('drag-over'));
         btn.classList.add('drag-over');
+        if (draggedDialId && dragHoverTabId !== g.id) {
+          clearTimeout(dragHoverTimer);
+          dragHoverTabId = g.id;
+          dragHoverTimer = setTimeout(() => {
+            if (state.activeGroup !== g.id) switchView(g.id);
+            dragHoverTabId = null;
+          }, 600);
+        }
+      });
+      btn.addEventListener('dragleave', () => {
+        btn.classList.remove('drag-over');
+        if (dragHoverTabId === g.id) {
+          clearTimeout(dragHoverTimer);
+          dragHoverTabId = null;
+        }
       });
       btn.addEventListener('drop', e => {
         e.preventDefault();
         btn.classList.remove('drag-over');
+        clearTimeout(dragHoverTimer);
+        dragHoverTabId = null;
+        hideDropIndicator();
         const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
         const draggedTabId = e.dataTransfer?.getData(TAB_DRAG_MIME) || draggingTabId;
 
         if (draggedDialId) {
-          // Drop dial onto tab
           moveDial(draggedDialId, g.id);
           draggingDialId = null;
+          if (state.activeGroup !== g.id) switchView(g.id);
           return;
         }
 
@@ -1085,10 +1117,16 @@ function buildTabs() {
         const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
         if (draggedDialId) e.preventDefault();
       });
+      btn.addEventListener('dragleave', () => {
+        clearTimeout(dragHoverTimer);
+        dragHoverTabId = null;
+      });
       btn.addEventListener('drop', e => {
         const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
         if (!draggedDialId) return;
         e.preventDefault();
+        clearTimeout(dragHoverTimer);
+        dragHoverTabId = null;
         draggingDialId = null;
       });
     }
@@ -1123,6 +1161,7 @@ function updateTabsActivePill() {
 
 function switchView(groupId) {
   if (state.activeGroup === groupId) return;
+  folderStack = [];
   state.activeGroup = groupId;
   saveState({ scheduleBackup: false });
   syncActiveTabButton();
@@ -1149,17 +1188,164 @@ function activeGroup() {
   return state.groups.find(g => g.id === state.activeGroup) || state.groups[0];
 }
 
+function activeDialList() {
+  let list = activeGroup()?.dials || [];
+  for (const folderId of folderStack) {
+    const folder = list.find(item => item.id === folderId && item.type === 'folder');
+    if (!folder) {
+      folderStack = [];
+      return activeGroup()?.dials || [];
+    }
+    folder.dials = Array.isArray(folder.dials) ? folder.dials : [];
+    list = folder.dials;
+  }
+  return list;
+}
+
+function parentDialList() {
+  if (!folderStack.length) return null;
+  let list = activeGroup()?.dials || [];
+  for (const folderId of folderStack.slice(0, -1)) {
+    const folder = list.find(item => item.id === folderId && item.type === 'folder');
+    if (!folder) return null;
+    folder.dials = Array.isArray(folder.dials) ? folder.dials : [];
+    list = folder.dials;
+  }
+  return list;
+}
+
+function findDialEntry(id, list = null) {
+  if (!list) {
+    for (const group of state.groups) {
+      const found = findDialEntry(id, group.dials || []);
+      if (found) return found;
+    }
+    return null;
+  }
+  const source = list;
+  for (const item of source) {
+    if (item.id === id) return { item, list: source, index: source.indexOf(item) };
+    if (item.type === 'folder' && Array.isArray(item.dials)) {
+      const found = findDialEntry(id, item.dials);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function openFolder(folderId) {
+  folderStack.push(folderId);
+  renderDials();
+}
+
+function closeFolderLevel() {
+  folderStack.pop();
+  renderDials();
+}
+
+// ─── Drop indicator ──────────────────────────────────────────
+let dragDropIdx = -1;
+function showDropIndicator(insertBefore, refCard) {
+  if (!refCard) { hideDropIndicator(); return; }
+  const idx = insertBefore ? 'before-' + refCard.dataset.id : 'after-' + refCard.dataset.id;
+  if (idx === dragDropIdx && dragDropIndicator?.isConnected) return;
+  dragDropIdx = idx;
+  if (!dragDropIndicator) {
+    dragDropIndicator = document.createElement('div');
+    dragDropIndicator.className = 'dial-drop-indicator';
+    document.body.appendChild(dragDropIndicator);
+  }
+  const r = refCard.getBoundingClientRect();
+  const x = insertBefore ? r.left - 2 : r.right - 2;
+  const h = Math.min(r.height, 80);
+  dragDropIndicator.style.left = x + 'px';
+  dragDropIndicator.style.top = (r.top + r.height / 2) + 'px';
+  dragDropIndicator.style.height = h + 'px';
+  dragDropIndicator.classList.add('visible');
+}
+function hideDropIndicator() {
+  dragDropIdx = -1;
+  if (dragDropIndicator) {
+    dragDropIndicator.remove();
+    dragDropIndicator = null;
+  }
+}
+
+// ─── FLIP animation for smooth grid reorder ────────────────
+let _flipRects = null;
+function snapCardPositions() {
+  _flipRects = new Map();
+  document.querySelectorAll('.dial-card').forEach(c => {
+    _flipRects.set(c.dataset.id, c.getBoundingClientRect());
+  });
+}
+function flipAnimateCards() {
+  if (!_flipRects) return;
+  const cards = document.querySelectorAll('.dial-card');
+  cards.forEach(card => {
+    const old = _flipRects.get(card.dataset.id);
+    if (!old) return;
+    const cur = card.getBoundingClientRect();
+    const dx = old.left - cur.left;
+    const dy = old.top - cur.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    card.style.transition = 'none';
+    card.style.transform = `translate(${dx}px, ${dy}px)`;
+    card.offsetHeight;
+    card.style.transition = 'transform .35s cubic-bezier(.22,1,.36,1)';
+    card.style.transform = '';
+    card.addEventListener('transitionend', function handler() {
+      card.style.transition = '';
+      card.style.transform = '';
+      card.removeEventListener('transitionend', handler);
+    });
+  });
+  _flipRects = null;
+}
+
 // ─── Dials ──────────────────────────────────────────────────
 function renderDials() {
   const grid = document.getElementById('dials-grid');
   grid.innerHTML = '';
+  if (dragDropIndicator) { dragDropIndicator.remove(); dragDropIndicator = null; }
+  dragDropIdx = -1;
+  _flipRects = null;
   const g = activeGroup();
   if (!g || g.isHome) return;
+  const items = activeDialList();
   const s = state.settings;
 
-  g.dials.forEach((dial, i) => {
+  if (folderStack.length) {
+    const back = document.createElement('div');
+    back.className = 'dial-card dial-add dial-folder-back';
+    back.innerHTML = '<div class="dial-add-inner"><div class="dial-add-icon">←</div><div class="dial-add-text">Back</div></div>';
+    back.addEventListener('click', closeFolderLevel);
+    back.addEventListener('dragover', e => {
+      const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
+      if (!draggedDialId) return;
+      e.preventDefault();
+      back.classList.add('drag-over-folder');
+    });
+    back.addEventListener('dragleave', () => back.classList.remove('drag-over-folder'));
+    back.addEventListener('drop', e => {
+      e.preventDefault();
+      back.classList.remove('drag-over-folder');
+      const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
+      const found = findDialEntry(draggedDialId);
+      const parent = parentDialList();
+      if (!found || !parent || found.list === parent) return;
+      const [movedDial] = found.list.splice(found.index, 1);
+      parent.push(movedDial);
+      draggingDialId = null;
+      saveState();
+      renderDials();
+    });
+    grid.appendChild(back);
+  }
+
+  items.forEach((dial, i) => {
     const card = document.createElement('div');
-    card.className = 'dial-card' +
+    card.className = 'dial-card' + (dial.type === 'folder' ? ' dial-folder' : '') +
       (s.showBorder ? '' : ' no-border') +
       (s.glass ? '' : ' no-glass') +
       (s.hoverZoom ? '' : ' no-zoom');
@@ -1181,52 +1367,99 @@ function renderDials() {
     });
     card.addEventListener('dragend', () => {
       draggingDialId = null;
+      clearTimeout(dragHoverTimer);
+      dragHoverTabId = null;
+      hideDropIndicator();
       card.classList.remove('dragging');
       document.querySelectorAll('.dial-card').forEach(c => {
-        c.classList.remove('drag-over-left', 'drag-over-right');
+        c.classList.remove('drag-over-left', 'drag-over-right', 'drag-over-folder');
       });
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('drag-over'));
     });
     card.addEventListener('dragover', e => {
       const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
       if (!draggedDialId || draggedDialId === dial.id) return;
+      const draggedItem = findDial(draggedDialId);
       e.preventDefault();
       document.querySelectorAll('.dial-card').forEach(c => {
-        c.classList.remove('drag-over-left', 'drag-over-right');
+        c.classList.remove('drag-over-left', 'drag-over-right', 'drag-over-folder');
       });
       const rect = card.getBoundingClientRect();
-      const isLeft = e.clientX < rect.left + rect.width / 2;
-      card.classList.add(isLeft ? 'drag-over-left' : 'drag-over-right');
+      const rel = (e.clientX - rect.left) / rect.width;
+      if (dial.type === 'folder' && draggedItem?.type !== 'folder' && rel > 0.25 && rel < 0.75) {
+        card.classList.add('drag-over-folder');
+        hideDropIndicator();
+      } else {
+        const insertBefore = rel < 0.5;
+        card.classList.add(insertBefore ? 'drag-over-left' : 'drag-over-right');
+        showDropIndicator(insertBefore, card);
+      }
     });
     card.addEventListener('drop', e => {
       e.preventDefault();
+      hideDropIndicator();
       document.querySelectorAll('.dial-card').forEach(c => {
-        c.classList.remove('drag-over-left', 'drag-over-right');
+        c.classList.remove('drag-over-left', 'drag-over-right', 'drag-over-folder');
       });
       const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
       if (!draggedDialId || draggedDialId === dial.id) return;
 
-      const fromGroup = state.groups.find(gr => gr.dials.some(d => d.id === draggedDialId));
-      if (!fromGroup) return;
-      const toGroup = g;
-
-      const fromIdx = fromGroup.dials.findIndex(d => d.id === draggedDialId);
-      const [movedDial] = fromGroup.dials.splice(fromIdx, 1);
-
-      const toIdx = toGroup.dials.findIndex(d => d.id === dial.id);
+      const found = findDialEntry(draggedDialId);
+      if (!found) return;
+      const toList = activeDialList();
       const rect = card.getBoundingClientRect();
+      const rel = (e.clientX - rect.left) / rect.width;
+
+      if (dial.type === 'folder' && found.item.type !== 'folder' && rel > 0.25 && rel < 0.75) {
+        const [movedDial] = found.list.splice(found.index, 1);
+        dial.dials = Array.isArray(dial.dials) ? dial.dials : [];
+        dial.dials.push(movedDial);
+        draggingDialId = null;
+        saveState();
+        renderDials();
+        return;
+      }
+
+      snapCardPositions();
+
+      const [movedDial] = found.list.splice(found.index, 1);
+      const toIdx = toList.findIndex(d => d.id === dial.id);
       const insertAfter = e.clientX >= rect.left + rect.width / 2;
-      toGroup.dials.splice(insertAfter ? toIdx + 1 : toIdx, 0, movedDial);
+      toList.splice(insertAfter ? toIdx + 1 : toIdx, 0, movedDial);
+
+      const draggedCard = document.querySelector(`.dial-card[data-id="${draggedDialId}"]`);
+      const grid = document.getElementById('dials-grid');
+      if (draggedCard && grid && found.list === toList) {
+        const refCard = document.querySelector(`.dial-card[data-id="${dial.id}"]`);
+        const ipos = insertAfter ? (refCard?.nextElementSibling?.classList.contains('dial-card') ? refCard.nextElementSibling : null) : refCard;
+        if (ipos && ipos !== draggedCard) grid.insertBefore(draggedCard, ipos);
+        else if (!ipos && refCard !== draggedCard) grid.appendChild(draggedCard);
+        flipAnimateCards();
+      } else {
+        renderDials();
+      }
 
       draggingDialId = null;
       saveState();
-      renderDials();
     });
 
     // ── Thumbnail area ──
     const thumb = document.createElement('div');
     thumb.className = 'dial-thumb';
 
-    if (dial.customIcon) {
+    const folderCoverIcon = getFolderCoverIcon(dial);
+    if (dial.type === 'folder' && folderCoverIcon) {
+      const img = document.createElement('img');
+      img.className = 'dial-thumb-img dial-thumb-custom-icon';
+      img.src = folderCoverIcon;
+      img.alt = '';
+      thumb.appendChild(img);
+    } else if (dial.type === 'folder' && !dial.customIcon) {
+      const ph = document.createElement('div');
+      ph.className = 'dial-thumb-placeholder dial-folder-thumb';
+      ph.innerHTML = '<div class="dial-folder-icon">▦</div>';
+      thumb.appendChild(ph);
+    } else if (dial.customIcon) {
       const img = document.createElement('img');
       img.className = 'dial-thumb-img dial-thumb-custom-icon';
       img.src = dial.customIcon;
@@ -1275,7 +1508,18 @@ function renderDials() {
       footer.className = 'dial-footer' + (s.showLabel ? '' : ' no-label');
 
       const dialFavicon = getDialFavicon(dial);
-      if (s.showFavicon && dialFavicon && !dial.customIcon) {
+      if (dial.type === 'folder' && s.showFavicon && folderCoverIcon) {
+        const fi = document.createElement('img');
+        fi.className = 'dial-footer-icon';
+        fi.src = folderCoverIcon;
+        fi.alt = '';
+        footer.appendChild(fi);
+      } else if (dial.type === 'folder' && s.showFavicon && !dial.customIcon) {
+        const fl = document.createElement('div');
+        fl.className = 'dial-footer-icon-letter';
+        fl.textContent = '▦';
+        footer.appendChild(fl);
+      } else if (s.showFavicon && dialFavicon && !dial.customIcon) {
         const fi = document.createElement('img');
         fi.className = 'dial-footer-icon';
         fi.src = dialFavicon;
@@ -1297,7 +1541,7 @@ function renderDials() {
       if (s.showLabel) {
         const label = document.createElement('div');
         label.className = 'dial-label';
-        label.textContent = dial.name || cleanHost(dial.url);
+        label.textContent = dial.name || (dial.type === 'folder' ? 'Folder' : cleanHost(dial.url));
         footer.appendChild(label);
       }
 
@@ -1314,6 +1558,7 @@ function renderDials() {
     card.appendChild(ctx);
 
     card.addEventListener('click', () => {
+      if (dial.type === 'folder') { openFolder(dial.id); return; }
       if (checkFocusBlock(g.id)) {
         window._lastBlockedUrl = dial.url;
         showBlockedToast(focusSession?.hardBlock);
@@ -1324,6 +1569,7 @@ function renderDials() {
     card.addEventListener('auxclick', e => {
       if (e.button !== 1) return;
       e.preventDefault();
+      if (dial.type === 'folder') return;
       if (checkFocusBlock(g.id)) {
         window._lastBlockedUrl = dial.url;
         showBlockedToast(focusSession?.hardBlock);
@@ -1342,31 +1588,50 @@ function renderDials() {
   const add = document.createElement('div');
   add.className = 'dial-card dial-add';
   add.style.display = s.showAddDialButton ? '' : 'none';
-  add.style.animationDelay = `${g.dials.length * 0.03}s`;
+  add.style.animationDelay = `${items.length * 0.03}s`;
   const addInner = document.createElement('div');
   addInner.className = 'dial-add-inner';
   addInner.innerHTML = '<div class="dial-add-icon">+</div><div class="dial-add-text">Add Dial</div>';
   add.appendChild(addInner);
-  add.addEventListener('click', () => openDialModal(null));
+  add.addEventListener('click', e => showCreateMenu(e.clientX, e.clientY));
   // Allow drops on the add button too (append at end)
   add.addEventListener('dragover', e => {
     const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
-    if (draggedDialId) e.preventDefault();
+    if (draggedDialId) {
+      e.preventDefault();
+      const cards = grid.querySelectorAll('.dial-card:not(.dial-add)');
+      const lastCard = cards[cards.length - 1];
+      if (lastCard) showDropIndicator(false, lastCard);
+      else hideDropIndicator();
+    }
+  });
+  add.addEventListener('dragleave', () => {
+    const draggedDialId = draggingDialId;
+    if (!draggedDialId) hideDropIndicator();
   });
   add.addEventListener('drop', e => {
     e.preventDefault();
+    hideDropIndicator();
     const draggedDialId = e.dataTransfer?.getData(DIAL_DRAG_MIME) || draggingDialId;
     if (!draggedDialId) return;
-    const fromGroup = state.groups.find(gr => gr.dials.some(d => d.id === draggedDialId));
-    if (!fromGroup) return;
-    const fromIdx = fromGroup.dials.findIndex(d => d.id === draggedDialId);
-    const [movedDial] = fromGroup.dials.splice(fromIdx, 1);
-    g.dials.push(movedDial);
+    const found = findDialEntry(draggedDialId);
+    if (!found) return;
+    snapCardPositions();
+    const [movedDial] = found.list.splice(found.index, 1);
+    activeDialList().push(movedDial);
+    const draggedCard = document.querySelector(`.dial-card[data-id="${draggedDialId}"]`);
+    const grid = document.getElementById('dials-grid');
+    if (draggedCard && grid && found.list === activeDialList()) {
+      grid.insertBefore(draggedCard, add);
+      flipAnimateCards();
+    } else {
+      renderDials();
+    }
     draggingDialId = null;
     saveState();
-    renderDials();
   });
   grid.appendChild(add);
+
 }
 
 function cleanHost(url) {
@@ -1385,21 +1650,50 @@ function getDialFavicon(dial) {
   return dial?.favIconUrl || dial?.favicon || null;
 }
 
+function getFolderCoverIcon(folder) {
+  if (!folder || folder.type !== 'folder' || !folder.coverDialId) return null;
+  const dial = (folder.dials || []).find(item => item.id === folder.coverDialId && item.type !== 'folder');
+  return dial?.customIcon || getDialFavicon(dial) || null;
+}
+
 function findDial(id) {
-  for (const g of state.groups) { const d = g.dials.find(d => d.id===id); if (d) return d; }
+  return findDialEntry(id)?.item;
 }
 
 // ─── Dial Modal ──────────────────────────────────────────────
-function openDialModal(dialId) {
+function openDialModal(dialId, itemType = 'dial') {
   editingDialId = dialId;
+  editingItemType = itemType;
   selectedIconUrl = null;
   const d = dialId ? findDial(dialId) : null;
+  if (d?.type === 'folder') editingItemType = 'folder';
   const fallbackScale = getIconScale(state.settings.dialIconScale);
   const currentScale = Number.isFinite(Number(d?.iconScale)) ? Number(d.iconScale) : fallbackScale;
   const hasCustomIcon = !!d?.customIcon;
-  document.getElementById('modal-dial-title').textContent = dialId ? 'Edit Dial' : 'Add Dial';
+  document.getElementById('modal-dial-title').textContent = editingItemType === 'folder'
+    ? (dialId ? 'Edit Folder' : 'Add Folder')
+    : (dialId ? 'Edit Dial' : 'Add Dial');
   document.getElementById('dial-name-inp').value = d?.name || '';
   document.getElementById('dial-url-inp').value = d?.url || '';
+  const urlInput = document.getElementById('dial-url-inp');
+  const urlLabel = document.getElementById('dial-url-label');
+  if (urlLabel) urlLabel.style.display = editingItemType === 'folder' ? 'none' : '';
+  urlInput.style.display = editingItemType === 'folder' ? 'none' : '';
+  const folderCoverArea = document.getElementById('folder-cover-area');
+  const folderCoverSelect = document.getElementById('folder-cover-select');
+  if (folderCoverArea && folderCoverSelect) {
+    folderCoverArea.style.display = editingItemType === 'folder' && d ? 'block' : 'none';
+    folderCoverSelect.innerHTML = '<option value="">Default folder icon</option>';
+    if (editingItemType === 'folder' && d) {
+      (d.dials || []).filter(item => item.type !== 'folder').forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.id;
+        opt.textContent = item.name || cleanHost(item.url);
+        folderCoverSelect.appendChild(opt);
+      });
+      folderCoverSelect.value = d.coverDialId || '';
+    }
+  }
   document.getElementById('dial-icon-scale-inp').value = String(currentScale);
   document.querySelector(`input[name="icon-src"][value="${hasCustomIcon ? 'upload' : 'auto'}"]`).checked = true;
   document.getElementById('icon-search-area').style.display = 'none';
@@ -1418,17 +1712,25 @@ function openDialModal(dialId) {
 function closeDialModal() {
   closeOverlay('modal-dial');
   editingDialId = null;
+  editingItemType = 'dial';
   selectedIconUrl = null;
+}
+
+function openFolderModal(folderId) {
+  openDialModal(folderId, 'folder');
 }
 
 async function saveDialModal() {
   const name = document.getElementById('dial-name-inp').value.trim();
   let url = document.getElementById('dial-url-inp').value.trim();
   const iconScale = getIconScale(parseInt(document.getElementById('dial-icon-scale-inp').value, 10));
-  if (!url) return;
-  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  if (editingItemType !== 'folder') {
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  }
 
   const iconSrc = document.querySelector('input[name="icon-src"]:checked').value;
+  const coverDialId = document.getElementById('folder-cover-select')?.value || '';
   const existingDial = editingDialId ? findDial(editingDialId) : null;
   let customIcon = existingDial?.customIcon || null;
   let favicon = existingDial?.favIconUrl || existingDial?.favicon || null;
@@ -1442,24 +1744,31 @@ async function saveDialModal() {
   } else if (iconSrc === 'search' && selectedIconUrl) {
     customIcon = selectedIconUrl;
     favicon = null;
+  } else if (editingItemType === 'folder') {
+    customIcon = null;
+    favicon = null;
   } else {
     customIcon = null;
     favicon = faviconUrl(url);
   }
 
-  const g = activeGroup();
   if (editingDialId) {
     const d = findDial(editingDialId);
     if (d) {
-      d.name = name || cleanHost(url);
-      d.url = url;
-      d.favicon = favicon;
-      d.favIconUrl = favicon;
+      d.name = name || (editingItemType === 'folder' ? 'Folder' : cleanHost(url));
+      if (editingItemType !== 'folder') {
+        d.url = url;
+        d.favicon = favicon;
+        d.favIconUrl = favicon;
+      }
       d.customIcon = customIcon;
+      if (editingItemType === 'folder') d.coverDialId = coverDialId;
       d.iconScale = iconScale;
     }
+  } else if (editingItemType === 'folder') {
+    activeDialList().push({ id: uid(), type: 'folder', name: name || 'Folder', customIcon, coverDialId: '', iconScale, dials: [] });
   } else {
-    g.dials.push({ id: uid(), name: name || cleanHost(url), url, favicon, favIconUrl: favicon, customIcon, iconScale });
+    activeDialList().push({ id: uid(), type: 'dial', name: name || cleanHost(url), url, favicon, favIconUrl: favicon, customIcon, iconScale });
   }
   saveState(); renderDials(); closeDialModal();
 }
@@ -1488,23 +1797,55 @@ function positionEl(el, x, y) {
 function hideCtx() {
   const menu = document.getElementById('ctx-menu');
   const sub = document.getElementById('ctx-move-sub');
+  const top = document.getElementById('topbar-ctx-menu');
+  const create = document.getElementById('create-ctx-menu');
   menu.classList.remove('is-open');
   sub.classList.remove('is-open');
+  top?.classList.remove('is-open');
+  create?.classList.remove('is-open');
   clearTimeout(ctxHideTimer);
   ctxHideTimer = setTimeout(() => {
     menu.style.display = 'none';
     sub.style.display = 'none';
+    if (top) top.style.display = 'none';
+    if (create) create.style.display = 'none';
   }, 180);
   ctxDialId = null;
 }
 
+function showTopBarCtxMenu(e) {
+  const menu = document.getElementById('topbar-ctx-menu');
+  if (!menu) return;
+  clearTimeout(ctxHideTimer);
+  menu.style.display = 'block';
+  positionEl(menu, e.clientX, e.clientY);
+  requestAnimationFrame(() => menu.classList.add('is-open'));
+}
+
+function showCreateMenu(x, y) {
+  const menu = document.getElementById('create-ctx-menu');
+  if (!menu) return;
+  const folderItem = document.getElementById('create-folder');
+  if (folderItem) folderItem.style.display = folderStack.length ? 'none' : '';
+  clearTimeout(ctxHideTimer);
+  menu.style.display = 'block';
+  positionEl(menu, x, y);
+  requestAnimationFrame(() => menu.classList.add('is-open'));
+}
+
+function switchSettingsSection(section) {
+  document.querySelectorAll('.settings-nav-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.section === section);
+  });
+  document.querySelectorAll('#modal-settings .s-section').forEach(panel => {
+    panel.classList.toggle('active', panel.dataset.section === section);
+  });
+}
+
 function moveDial(dialId, toGroupId) {
-  let dial = null;
-  for (const g of state.groups) {
-    const i = g.dials.findIndex(d => d.id === dialId);
-    if (i !== -1) { dial = g.dials.splice(i, 1)[0]; break; }
-  }
-  if (dial) {
+  const found = findDialEntry(dialId);
+  if (found) {
+    const [dial] = found.list.splice(found.index, 1);
     const tg = state.groups.find(g => g.id === toGroupId);
     if (tg) tg.dials.push(dial);
   }
@@ -1513,6 +1854,18 @@ function moveDial(dialId, toGroupId) {
 
 function normalizeDial(input) {
   if (!input) return null;
+  if (input.type === 'folder') {
+    const iconScaleRaw = parseInt(input.iconScale, 10);
+    return {
+      id: input.id || uid(),
+      type: 'folder',
+      name: String(input.name || input.title || 'Folder').trim() || 'Folder',
+      customIcon: input.customIcon || null,
+      coverDialId: input.coverDialId || '',
+      iconScale: Number.isFinite(iconScaleRaw) ? iconScaleRaw : 100,
+      dials: Array.isArray(input.dials) ? input.dials.map(item => normalizeDial(item)).filter(Boolean) : []
+    };
+  }
   const rawUrl = String(input.url || input.link || input.display_url || input.site || '').trim();
   if (!rawUrl) return null;
   const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
@@ -1520,7 +1873,8 @@ function normalizeDial(input) {
   const iconScaleRaw = parseInt(input.iconScale, 10);
   const iconScale = Number.isFinite(iconScaleRaw) ? iconScaleRaw : 100;
   return {
-    id: uid(),
+    id: input.id || uid(),
+    type: 'dial',
     name: String(input.name || input.title || input.label || cleanHost(url)).trim() || cleanHost(url),
     url,
     favicon: icon,
@@ -1638,6 +1992,50 @@ function deleteTab() {
   saveState(); buildTabs(); showView(state.activeGroup); closeTabModal();
 }
 
+// ─── AI / Encryption ──────────────────────────────────────────
+const AI_STORAGE_KEY = 'spacedial-ai-key';
+const AI_ENC_KEY = 'spacedial-enc-key';
+
+async function getEncryptionKey() {
+  let raw = (await chrome.storage.local.get(AI_ENC_KEY))[AI_ENC_KEY];
+  if (!raw) {
+    const key = await crypto.subtle.generateKey({ name:'AES-GCM', length:256 }, true, ['encrypt','decrypt']);
+    raw = Array.from(new Uint8Array(await crypto.subtle.exportKey('raw', key)));
+    await chrome.storage.local.set({ [AI_ENC_KEY]: raw });
+    return key;
+  }
+  return crypto.subtle.importKey('raw', new Uint8Array(raw), { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+}
+
+async function encryptApiKey(plaintext) {
+  const key = await getEncryptionKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const enc = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, new TextEncoder().encode(plaintext));
+  return btoa(String.fromCharCode(...iv)) + '.' + btoa(String.fromCharCode(...new Uint8Array(enc)));
+}
+
+async function decryptApiKey(packet) {
+  try {
+    const [ivB64, dataB64] = packet.split('.');
+    const key = await getEncryptionKey();
+    const iv = Uint8Array.from(atob(ivB64), c => c.charCodeAt(0));
+    const data = Uint8Array.from(atob(dataB64), c => c.charCodeAt(0));
+    const dec = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, data);
+    return new TextDecoder().decode(dec);
+  } catch { return null; }
+}
+
+async function saveAiApiKey(plaintext) {
+  if (!plaintext) { await chrome.storage.local.remove(AI_STORAGE_KEY); return; }
+  const enc = await encryptApiKey(plaintext);
+  await chrome.storage.local.set({ [AI_STORAGE_KEY]: enc });
+}
+
+async function loadAiApiKey() {
+  const data = (await chrome.storage.local.get(AI_STORAGE_KEY))[AI_STORAGE_KEY];
+  return data ? decryptApiKey(data) : null;
+}
+
 // ─── Settings Modal ──────────────────────────────────────────
 function openSettings(triggerEl) {
   const s = state.settings;
@@ -1671,6 +2069,10 @@ function openSettings(triggerEl) {
   document.getElementById('s-show-player').checked = s.showPlayer;
   document.getElementById('s-show-notes').checked = s.showNotes;
   document.getElementById('s-speedtest-mode').value = s.speedTestMode || 'ookla';
+  document.getElementById('s-show-add-tab').checked = s.showAddTabButton !== false;
+  document.getElementById('s-show-focus-btn').checked = s.showFocusButton !== false;
+  document.getElementById('s-show-speedtest-btn').checked = s.showSpeedTestButton !== false;
+  document.getElementById('s-show-ai-btn').checked = s.showAiButton !== false;
   document.getElementById('s-weather-city').value = s.weatherCity;
   document.getElementById('s-temp-unit').value = s.tempUnit;
   document.getElementById('s-music-leave').value = s.musicLeave;
@@ -1678,6 +2080,13 @@ function openSettings(triggerEl) {
   document.getElementById('s-loop').checked = s.loopPlaylist;
   document.getElementById('s-shuffle-start').checked = s.shuffleOnStart;
   document.getElementById('s-blocked-domains').value = s.blockedDomains || '';
+  chrome.storage.local.get('ai-funny-thinking', r => { document.getElementById('s-ai-funny').checked = !!r['ai-funny-thinking']; });
+  switchSettingsSection('appearance');
+  document.querySelector('.settings-version').textContent = 'v' + chrome.runtime.getManifest().version;
+  loadAiApiKey().then(key => {
+    document.getElementById('s-ai-key').value = key ? '••••••••••••••••' : '';
+    document.getElementById('s-ai-key').dataset.hasKey = key ? '1' : '0';
+  });
   openOverlay('modal-settings', triggerEl);
 }
 function closeSettings() { closeOverlay('modal-settings'); }
@@ -1709,6 +2118,19 @@ async function saveSettings() {
   s.showPlayer = document.getElementById('s-show-player').checked;
   s.showNotes = document.getElementById('s-show-notes').checked;
   s.speedTestMode = document.getElementById('s-speedtest-mode').value || 'ookla';
+  s.showAddTabButton = document.getElementById('s-show-add-tab').checked;
+  s.showFocusButton = document.getElementById('s-show-focus-btn').checked;
+  s.showSpeedTestButton = document.getElementById('s-show-speedtest-btn').checked;
+  s.showAiButton = document.getElementById('s-show-ai-btn').checked;
+  const aiKeyEl = document.getElementById('s-ai-key');
+  if (aiKeyEl.dataset.hasKey === '1' && !aiKeyEl.value) {
+    await saveAiApiKey('');
+    aiKeyEl.dataset.hasKey = '0';
+  } else if (aiKeyEl.dataset.hasKey !== '1' && aiKeyEl.value && !aiKeyEl.value.startsWith('••')) {
+    await saveAiApiKey(aiKeyEl.value);
+    aiKeyEl.dataset.hasKey = '1';
+  }
+  chrome.storage.local.set({ 'ai-funny-thinking': !!document.getElementById('s-ai-funny').checked });
   s.weatherCity = document.getElementById('s-weather-city').value.trim() || 'Dublin';
   s.tempUnit = document.getElementById('s-temp-unit').value;
   s.musicLeave = document.getElementById('s-music-leave').value;
@@ -1774,6 +2196,23 @@ function openSpeedTest() {
   chrome.tabs.create({ url: 'https://www.speedtest.net/' });
 }
 
+let aiPanelOpen = false;
+function openAI() {
+  aiPanelOpen = !aiPanelOpen;
+  document.getElementById('ai-btn').classList.toggle('active', aiPanelOpen);
+  document.getElementById('ai-panel').classList.toggle('open', aiPanelOpen);
+  document.getElementById('ai-panel').style.display = aiPanelOpen ? 'block' : 'none';
+  if (aiPanelOpen) {
+    document.getElementById('ai-frame').src = 'ai.html?new=' + Date.now();
+  }
+}
+function closeAI() {
+  aiPanelOpen = false;
+  document.getElementById('ai-btn').classList.remove('active');
+  document.getElementById('ai-panel').classList.remove('open');
+  document.getElementById('ai-panel').style.display = 'none';
+}
+
 // ─── Import / Export ─────────────────────────────────────────
 function openIE(triggerEl) { openOverlay('modal-ie', triggerEl); }
 function closeIE() { closeOverlay('modal-ie'); }
@@ -1783,20 +2222,20 @@ function doExportFull() {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `dialspace-full-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `spacedial-full-backup-${new Date().toISOString().slice(0,10)}.json`;
   a.click();
 }
 
 function doExportMinimal() {
   const data = {
-    format: 'dialspace-minimal-backup-v1',
+    format: 'spacedial-minimal-backup-v1',
     exportedAt: new Date().toISOString(),
     data: cloudSerialize()
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `dialspace-minimal-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `spacedial-minimal-backup-${new Date().toISOString().slice(0,10)}.json`;
   a.click();
 }
 
@@ -1808,7 +2247,7 @@ function doImport(file) {
       const data = normalizeImportedCloudPayload(imported) || imported;
       const source = importData(data);
       saveState(); applySettings(true); buildTabs(); showView(state.activeGroup);
-      closeIE(); alert(`Imported ${source} successfully!`);
+      closeIE(); closeSettings(); alert(`Imported ${source} successfully!`);
     } catch(err) { alert('Invalid backup file: ' + err.message); }
   };
   r.readAsText(file);
@@ -1835,7 +2274,10 @@ function importFvdText(rawText) {
   showView(state.activeGroup);
   const textArea = document.getElementById('ie-import-fvd-text');
   if (textArea) textArea.value = '';
+  const settingsTextArea = document.getElementById('s-import-fvd-text');
+  if (settingsTextArea) settingsTextArea.value = '';
   closeIE();
+  closeSettings();
   alert('Imported FVD Speed Dial successfully!');
 }
 
@@ -1844,7 +2286,7 @@ function doReset() {
   chrome.storage.local.remove('ds2', () => {
     state = DEFAULT_STATE();
     applySettings(true); buildTabs(); showView(state.activeGroup);
-    closeIE();
+    closeIE(); closeSettings();
   });
 }
 
@@ -1852,16 +2294,31 @@ function doReset() {
 function cloudSerialize() {
   const s = JSON.parse(JSON.stringify(state));
   s.player.playlist = s.player.playlist.filter(t => t.type === 'url');
+  const serializeDialItem = item => item.type === 'folder'
+    ? {
+        id: item.id,
+        type: 'folder',
+        name: item.name,
+        customIcon: item.customIcon && item.customIcon.length <= 1500 ? item.customIcon : null,
+        coverDialId: item.coverDialId || '',
+        iconScale: item.iconScale,
+        dials: (item.dials || []).map(serializeDialItem)
+      }
+    : {
+        id: item.id,
+        type: 'dial',
+        name: item.name,
+        url: item.url,
+        favicon: item.favicon || item.favIconUrl || null,
+        favIconUrl: item.favIconUrl || item.favicon || null,
+        customIcon: item.customIcon && item.customIcon.length <= 1500 ? item.customIcon : null,
+        iconScale: item.iconScale
+      };
   s.groups = s.groups.map(group => ({
     id: group.id,
     name: group.name,
     isHome: !!group.isHome,
-    dials: (group.dials || []).map(dial => ({
-      id: dial.id,
-      name: dial.name,
-      url: dial.url,
-      customIcon: dial.customIcon && dial.customIcon.length <= 1500 ? dial.customIcon : null
-    }))
+    dials: (group.dials || []).map(serializeDialItem)
   }));
   s.player = {
     playlist: s.player.playlist.map(track => ({
@@ -1974,7 +2431,7 @@ function normalizeImportedCloudPayload(value) {
     if (parsed == null) return null;
     current = parsed;
     if (typeof current === 'string') continue;
-    if (current?.format === 'dialspace-minimal-backup-v1' && current?.data) {
+    if ((current?.format === 'spacedial-minimal-backup-v1' || current?.format === 'dialspace-minimal-backup-v1') && current?.data) {
       current = current.data;
       continue;
     }
@@ -2052,12 +2509,12 @@ function deepCollectBackups(value, out, visited = new WeakSet(), depth = 0) {
   Object.values(value).forEach(item => deepCollectBackups(item, out, visited, depth + 1));
 }
 
-function looksLikeDialSpaceData(obj) {
+function looksLikeSpaceDialData(obj) {
   if (!obj || typeof obj !== 'object') return false;
   if (Array.isArray(obj?.groups) && obj.groups.length) return true;
-  if (obj?.data && looksLikeDialSpaceData(obj.data)) return true;
-  if (obj?.backup && looksLikeDialSpaceData(obj.backup)) return true;
-  if (obj?.payload && looksLikeDialSpaceData(obj.payload)) return true;
+  if (obj?.data && looksLikeSpaceDialData(obj.data)) return true;
+  if (obj?.backup && looksLikeSpaceDialData(obj.backup)) return true;
+  if (obj?.payload && looksLikeSpaceDialData(obj.payload)) return true;
   return false;
 }
 
@@ -2067,7 +2524,7 @@ function importFromCandidateList(candidates) {
   for (const candidate of candidates) {
     try {
       const normalized = normalizeImportedCloudPayload(candidate);
-      if (!normalized || typeof normalized !== 'object' || !looksLikeDialSpaceData(normalized)) continue;
+      if (!normalized || typeof normalized !== 'object' || !looksLikeSpaceDialData(normalized)) continue;
       importData(normalized);
       return { loaded: true, lastError: null };
     } catch (error) {
@@ -2840,11 +3297,27 @@ function bindAll() {
 
   // Add tab
   document.getElementById('add-tab-btn').addEventListener('click', e => openTabModal(null, e.currentTarget));
+  document.getElementById('tab-bar').addEventListener('contextmenu', e => {
+    if (e.target.closest('button')) return;
+    e.preventDefault();
+    hideCtx();
+    showTopBarCtxMenu(e);
+  });
+  document.getElementById('topbar-new-tab').addEventListener('click', e => {
+    openTabModal(null, e.currentTarget);
+    hideCtx();
+  });
+  document.getElementById('create-dial').addEventListener('click', () => { hideCtx(); openDialModal(null); });
+  document.getElementById('create-folder').addEventListener('click', () => {
+    if (folderStack.length) { hideCtx(); return; }
+    hideCtx();
+    openFolderModal(null);
+  });
 
   // Focus mode
   document.getElementById('focus-btn').addEventListener('click', e => openFocusModal(e.currentTarget));
   document.getElementById('focus-cancel').addEventListener('click', closeFocusModal);
-  document.getElementById('modal-focus').addEventListener('click', e => { if (e.target === e.currentTarget) closeFocusModal(); });
+  document.getElementById('modal-focus').addEventListener('mousedown', e => { if (e.target === e.currentTarget) closeFocusModal(); });
   document.getElementById('focus-start-btn').addEventListener('click', startFocus);
   document.getElementById('focus-stop-btn').addEventListener('click', () => endFocusSession(false));
   document.getElementById('focus-bar-end').addEventListener('click', () => endFocusSession(false));
@@ -2864,11 +3337,42 @@ function bindAll() {
 
   // Settings
   document.getElementById('speedtest-btn').addEventListener('click', openSpeedTest);
+  document.getElementById('ai-btn').addEventListener('click', openAI);
   document.getElementById('speedtest-panel-close').addEventListener('click', closeSpeedTestPanel);
+  document.getElementById('ai-panel-close').addEventListener('click', closeAI);
   document.getElementById('settings-btn').addEventListener('click', e => openSettings(e.currentTarget));
   document.getElementById('s-cancel').addEventListener('click', closeSettings);
   document.getElementById('s-save').addEventListener('click', saveSettings);
-  document.getElementById('modal-settings').addEventListener('click', e => { if (e.target === e.currentTarget) closeSettings(); });
+  document.getElementById('modal-settings').addEventListener('mousedown', e => { if (e.target === e.currentTarget) closeSettings(); });
+  document.querySelectorAll('.settings-nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchSettingsSection(btn.dataset.section));
+  });
+  document.getElementById('s-ai-key-toggle').addEventListener('click', () => {
+    const el = document.getElementById('s-ai-key');
+    el.type = el.type === 'password' ? 'text' : 'password';
+  });
+  document.getElementById('s-ai-clear-key').addEventListener('click', async () => {
+    await saveAiApiKey('');
+    document.getElementById('s-ai-key').value = '';
+    document.getElementById('s-ai-key').dataset.hasKey = '0';
+    document.getElementById('s-ai-status').textContent = 'Key cleared.';
+  });
+  document.getElementById('s-ai-test-key').addEventListener('click', async () => {
+    const status = document.getElementById('s-ai-status');
+    let key = document.getElementById('s-ai-key').value;
+    if (document.getElementById('s-ai-key').dataset.hasKey === '1') key = await loadAiApiKey();
+    if (!key || key === '••••••••••••••••') { status.textContent = 'No API key set.'; return; }
+    status.textContent = 'Testing…';
+    try {
+      const r = await fetch('https://opencode.ai/zen/v1/models', {
+        headers: { 'Authorization': 'Bearer ' + key }
+      });
+      if (r.ok) status.textContent = '✓ Connection successful (' + (await r.json()).data.length + ' models available)';
+      else status.textContent = '✗ Error ' + r.status + ': ' + (await r.text()).slice(0,80);
+    } catch (e) {
+      status.textContent = '✗ Network error: ' + e.message;
+    }
+  });
 
   document.querySelectorAll('input[name="bg-type"]').forEach(r => r.addEventListener('change', () => {
     document.getElementById('s-bg-color').style.display = r.value === 'solid' && r.checked ? 'block' : 'none';
@@ -2885,7 +3389,7 @@ function bindAll() {
   // Import/Export + Cloud
   document.getElementById('import-export-btn').addEventListener('click', e => openIE(e.currentTarget));
   document.getElementById('ie-close').addEventListener('click', closeIE);
-  document.getElementById('modal-ie').addEventListener('click', e => { if (e.target === e.currentTarget) closeIE(); });
+  document.getElementById('modal-ie').addEventListener('mousedown', e => { if (e.target === e.currentTarget) closeIE(); });
   document.getElementById('ie-export-min').addEventListener('click', doExportMinimal);
   document.getElementById('ie-export-full').addEventListener('click', doExportFull);
   document.getElementById('ie-import-btn').addEventListener('click', () => document.getElementById('ie-import-file').click());
@@ -2903,11 +3407,26 @@ function bindAll() {
   document.getElementById('ie-cloud-save').addEventListener('click', doCloudSave);
   document.getElementById('ie-cloud-load').addEventListener('click', doCloudLoad);
   document.getElementById('ie-cloud-clear').addEventListener('click', doCloudClear);
+  document.getElementById('s-export-min').addEventListener('click', doExportMinimal);
+  document.getElementById('s-export-full').addEventListener('click', doExportFull);
+  document.getElementById('s-import-btn').addEventListener('click', () => document.getElementById('ie-import-file').click());
+  document.getElementById('s-import-fvd-btn').addEventListener('click', () => document.getElementById('ie-import-fvd-file').click());
+  document.getElementById('s-import-fvd-text-btn').addEventListener('click', () => {
+    try {
+      importFvdText(document.getElementById('s-import-fvd-text').value);
+    } catch(err) {
+      alert('FVD import failed: ' + err.message);
+    }
+  });
+  document.getElementById('s-reset').addEventListener('click', doReset);
+  document.getElementById('s-cloud-save').addEventListener('click', doCloudSave);
+  document.getElementById('s-cloud-load').addEventListener('click', doCloudLoad);
+  document.getElementById('s-cloud-clear').addEventListener('click', doCloudClear);
 
   // Dial modal
   document.getElementById('modal-dial-cancel').addEventListener('click', closeDialModal);
   document.getElementById('modal-dial-save').addEventListener('click', saveDialModal);
-  document.getElementById('modal-dial').addEventListener('click', e => { if (e.target === e.currentTarget) closeDialModal(); });
+  document.getElementById('modal-dial').addEventListener('mousedown', e => { if (e.target === e.currentTarget) closeDialModal(); });
   document.getElementById('dial-url-inp').addEventListener('keydown', e => { if (e.key === 'Enter') saveDialModal(); });
 
   document.querySelectorAll('input[name="icon-src"]').forEach(r => r.addEventListener('change', () => {
@@ -2941,14 +3460,21 @@ function bindAll() {
   document.getElementById('modal-tab-cancel').addEventListener('click', closeTabModal);
   document.getElementById('modal-tab-save').addEventListener('click', saveTabModal);
   document.getElementById('tab-delete-btn').addEventListener('click', deleteTab);
-  document.getElementById('modal-tab').addEventListener('click', e => { if (e.target === e.currentTarget) closeTabModal(); });
+  document.getElementById('modal-tab').addEventListener('mousedown', e => { if (e.target === e.currentTarget) closeTabModal(); });
   document.getElementById('tab-name-inp').addEventListener('keydown', e => { if (e.key === 'Enter') saveTabModal(); });
 
   // Context menu
-  document.getElementById('ctx-edit').addEventListener('click', () => { if (ctxDialId) { openDialModal(ctxDialId); hideCtx(); } });
+  document.getElementById('ctx-edit').addEventListener('click', () => {
+    if (!ctxDialId) return;
+    const item = findDial(ctxDialId);
+    if (item?.type === 'folder') openFolderModal(ctxDialId);
+    else openDialModal(ctxDialId);
+    hideCtx();
+  });
   document.getElementById('ctx-del').addEventListener('click', () => {
     if (!ctxDialId) return;
-    for (const g of state.groups) { const i = g.dials.findIndex(d => d.id === ctxDialId); if (i !== -1) { g.dials.splice(i,1); break; } }
+    const found = findDialEntry(ctxDialId);
+    if (found) found.list.splice(found.index, 1);
     saveState(); renderDials(); hideCtx();
   });
   document.getElementById('ctx-move').addEventListener('click', () => {
@@ -2973,14 +3499,18 @@ function bindAll() {
   });
   document.addEventListener('mousedown', e => {
     isSelectingCtxText = document.getElementById('ctx-menu').contains(e.target) ||
-      document.getElementById('ctx-move-sub').contains(e.target);
+      document.getElementById('ctx-move-sub').contains(e.target) ||
+      document.getElementById('topbar-ctx-menu')?.contains(e.target) ||
+      document.getElementById('create-ctx-menu')?.contains(e.target);
     if (!isSelectingCtxText && !window.getSelection()?.toString()) hideCtx();
   });
   document.addEventListener('mouseup', e => {
     const hasSelection = !!window.getSelection()?.toString();
     if (hasSelection && isSelectingCtxText) return;
     if (!document.getElementById('ctx-menu').contains(e.target) &&
-        !document.getElementById('ctx-move-sub').contains(e.target)) hideCtx();
+        !document.getElementById('ctx-move-sub').contains(e.target) &&
+        !document.getElementById('topbar-ctx-menu')?.contains(e.target) &&
+        !document.getElementById('create-ctx-menu')?.contains(e.target)) hideCtx();
   });
 
   const dialsView = document.getElementById('view-dials');
@@ -2989,7 +3519,12 @@ function bindAll() {
     if (e.target.closest('#ctx-menu') || e.target.closest('#ctx-move-sub')) return;
     e.preventDefault();
     hideCtx();
-    openDialModal(null);
+    showCreateMenu(e.clientX, e.clientY);
+  });
+  dialsView.addEventListener('click', e => {
+    if (!folderStack.length) return;
+    if (e.target.closest('.dial-card') || e.target.closest('#ctx-menu') || e.target.closest('#ctx-move-sub') || e.target.closest('#create-ctx-menu')) return;
+    closeFolderLevel();
   });
 
   // Music player
@@ -3100,14 +3635,16 @@ function bindAll() {
 }
 
 async function checkForUpdates() {
-  const now = Date.now();
-  if (now - (state.lastUpdateCheck || 0) < 86400000) return;
   try {
-    const res = await fetch('https://api.github.com/repos/Tamp1x/SpaceDial/releases/latest');
+    const repoUrl = chrome.runtime.getManifest().homepage_url || 'https://github.com/Tamp1x/SpaceDial';
+    const apiRepo = repoUrl.replace('https://github.com/', '').replace(/\/$/, '');
+    const ac = new AbortController();
+    const to = setTimeout(() => ac.abort(), 10000);
+    const res = await fetch(`https://api.github.com/repos/${apiRepo}/releases/latest`, { signal: ac.signal });
+    clearTimeout(to);
+    if (!res.ok) return;
     const data = await res.json();
     if (data.tag_name) {
-      state.lastUpdateCheck = now;
-      saveState({ scheduleBackup: false });
       const remoteVersion = data.tag_name.replace(/^v/, '');
       const localVersion = chrome.runtime.getManifest().version;
       if (remoteVersion !== localVersion && remoteVersion !== state.ignoredUpdate) {
@@ -3124,7 +3661,7 @@ async function checkForUpdates() {
           toast.style.display = 'none';
           pendingBackupSnapshot = buildExportableState(state);
           saveBackupToFile();
-          window.open(data.html_url || 'https://github.com/Tamp1x/SpaceDial/releases/latest', '_blank');
+          window.open(data.html_url || repoUrl + '/releases/latest', '_blank');
         };
       }
     }

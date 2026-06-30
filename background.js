@@ -1,5 +1,5 @@
 /* ============================================================
-   DialSpace v3 — Background Service Worker
+   SpaceDial v3 — Background Service Worker
    ============================================================ */
 
 // ─── Extension icon click → open new tab ───────────────────
@@ -51,7 +51,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.notifications.create('music-playing', {
       type: 'basic',
       iconUrl: 'icons/icon48.png',
-      title: 'DialSpace — Music is playing',
+      title: 'SpaceDial — Music is playing',
       message: 'Music keeps playing. Click to return.',
       priority: 1
     }, () => {});
@@ -62,12 +62,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-// ─── Notification click → switch to DialSpace tab ──────────
+// ─── Notification click → switch to SpaceDial tab ──────────
 chrome.notifications.onClicked.addListener(notifId => {
   if (notifId === 'music-playing' && notifTabId != null) {
     chrome.tabs.update(notifTabId, { active: true }, () => {
       if (chrome.runtime.lastError) {
-        // Tab gone — open new DialSpace tab
+        // Tab gone — open new SpaceDial tab
         chrome.tabs.create({ url: 'newtab.html' });
       }
     });

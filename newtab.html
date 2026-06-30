@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DialSpace</title>
+<title>SpaceDial</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="newtab.css">
@@ -31,8 +31,9 @@
       <circle cx="12" cy="14" r="1.5"/>
     </svg>
   </button>
+  <button id="ai-btn" title="AI Chat">AI</button>
   <button id="settings-btn" title="Settings">⚙</button>
-  <button id="import-export-btn" title="Backup &amp; Sync">⇅</button>
+  <button id="import-export-btn" title="Backup &amp; Sync" style="display:none">⇅</button>
 </div>
 
 <div id="focus-bar" style="display:none">
@@ -164,7 +165,7 @@
     <div class="panel-title" id="modal-dial-title">Add Dial</div>
     <label class="field-label">Name</label>
     <input type="text" id="dial-name-inp" class="field" placeholder="My Site">
-    <label class="field-label">URL</label>
+    <label class="field-label" id="dial-url-label">URL</label>
     <input type="url" id="dial-url-inp" class="field" placeholder="https://example.com">
     <label class="field-label">Icon</label>
     <div class="radio-group">
@@ -198,6 +199,11 @@
         <span class="file-picker-name" id="dial-icon-file-name">No file selected</span>
       </div>
       <img id="dial-icon-preview" src="" alt="" style="display:none;width:48px;height:48px;border-radius:8px;margin-top:8px;object-fit:contain">
+    </div>
+    <div id="folder-cover-area" style="display:none;margin-top:12px">
+      <label class="field-label">Folder cover from dial</label>
+      <select id="folder-cover-select" class="field"></select>
+      <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.04em">Pick a dial inside this folder to reuse its icon as the folder picture.</p>
     </div>
     <label class="field-label" style="margin-top:12px">Dial icon scale</label>
     <select id="dial-icon-scale-inp" class="field">
@@ -238,13 +244,29 @@
   <div class="ctx-item ctx-danger" id="ctx-del">✕  Delete</div>
 </div>
 <div id="ctx-move-sub" style="display:none"></div>
+<div id="topbar-ctx-menu" style="display:none">
+  <div class="ctx-item" id="topbar-new-tab">＋  New group</div>
+</div>
+<div id="create-ctx-menu" style="display:none">
+  <div class="ctx-item" id="create-dial">＋  New dial</div>
+  <div class="ctx-item" id="create-folder">▦  New folder</div>
+</div>
 
 <!-- Settings -->
 <div id="modal-settings" class="overlay-panel" style="display:none">
   <div class="panel-box settings-box">
     <div class="panel-title">Settings</div>
+    <div class="settings-scroll">
+    <div class="settings-nav">
+      <button class="settings-nav-btn active" data-section="appearance">Appearance</button>
+      <button class="settings-nav-btn" data-section="dials">Dials</button>
+      <button class="settings-nav-btn" data-section="widgets">Widgets</button>
+      <button class="settings-nav-btn" data-section="music">Music &amp; Focus</button>
+      <button class="settings-nav-btn" data-section="ai">AI</button>
+      <button class="settings-nav-btn" data-section="backup">Backup</button>
+    </div>
     <div class="settings-grid">
-      <div class="s-section">
+      <div class="s-section active" data-section="appearance">
         <div class="s-section-title">Appearance</div>
         <label class="field-label">Wallpaper</label>
         <div class="radio-group">
@@ -277,8 +299,13 @@
           <option value="ookla" selected>Open SpeedTest by Ookla</option>
           <option value="internal">Open built-in SpeedTest panel</option>
         </select>
+        <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.04em">Built-in mode uses browser-accessible test endpoints; Ookla opens externally because their test data is not exposed as a public in-page API.</p>
+        <div class="s-section-title" style="margin-top:20px">Top bar</div>
+        <div class="toggle-row"><span>Show add group</span><label class="toggle"><input type="checkbox" id="s-show-add-tab" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Show focus mode</span><label class="toggle"><input type="checkbox" id="s-show-focus-btn" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Show SpeedTest</span><label class="toggle"><input type="checkbox" id="s-show-speedtest-btn" checked><span class="tog-slider"></span></label></div>
       </div>
-      <div class="s-section">
+      <div class="s-section" data-section="dials">
         <div class="s-section-title">Dials</div>
         <label class="field-label">Columns</label>
         <select id="s-cols" class="field">
@@ -325,7 +352,7 @@
           <span>Show ADD DIAL button</span><label class="toggle"><input type="checkbox" id="s-show-add-dial" checked><span class="tog-slider"></span></label>
         </div>
       </div>
-      <div class="s-section">
+      <div class="s-section" data-section="widgets">
         <div class="s-section-title">Widgets</div>
         <div class="toggle-row"><span>Show clock</span><label class="toggle"><input type="checkbox" id="s-show-clock" checked><span class="tog-slider"></span></label></div>
         <div class="toggle-row"><span>24h format</span><label class="toggle"><input type="checkbox" id="s-24h" checked><span class="tog-slider"></span></label></div>
@@ -347,7 +374,7 @@
           <option value="fahrenheit">Fahrenheit (°F)</option>
         </select>
       </div>
-      <div class="s-section">
+      <div class="s-section" data-section="music">
         <div class="s-section-title">Music</div>
         <label class="field-label">When tab loses focus (switching browser tabs)</label>
         <select id="s-music-leave" class="field">
@@ -363,10 +390,44 @@
         <p style="font-size:11px;color:var(--muted);margin-bottom:8px">One domain per line. These sites will be blocked during focus sessions.</p>
         <textarea id="s-blocked-domains" class="field" rows="6" style="resize:vertical;font-size:12px;font-family:monospace;line-height:1.5" placeholder="youtube.com&#10;tiktok.com&#10;twitter.com&#10;instagram.com&#10;reddit.com&#10;facebook.com"></textarea>
       </div>
+      <div class="s-section" data-section="ai">
+        <div class="s-section-title">AI</div>
+        <div class="toggle-row" style="margin-bottom:12px"><span>Show AI Chat button</span><label class="toggle"><input type="checkbox" id="s-show-ai-btn" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row" style="margin-bottom:12px"><span>Funny loading phrases</span><label class="toggle"><input type="checkbox" id="s-ai-funny"><span class="tog-slider"></span></label></div>
+        <label class="field-label">OpenCode Zen API Key</label>
+        <div style="display:flex;gap:6px">
+          <input type="password" id="s-ai-key" class="field" style="flex:1;font-family:monospace;font-size:12px" placeholder="oc_…">
+          <button id="s-ai-key-toggle" class="btn-mini" title="Show/hide key" style="padding:6px 10px">👁</button>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:6px;letter-spacing:0.04em">Get your key at <a href="https://opencode.ai/auth" target="_blank" style="color:rgba(100,180,255,0.7)">opencode.ai/auth</a>. Encrypted and stored locally.</p>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn-secondary" id="s-ai-test-key" style="font-size:12px">Test connection</button>
+          <button class="btn-mini" id="s-ai-clear-key" style="font-size:12px;color:var(--danger)">Clear key</button>
+        </div>
+        <div id="s-ai-status" style="font-size:12px;margin-top:8px;min-height:18px"></div>
+      </div>
+      <div class="s-section" data-section="backup">
+        <div class="s-section-title">Backup &amp; Sync</div>
+        <p style="color:var(--muted);font-size:12px;margin-bottom:10px">Folders, dials and their nested content are included in SpaceDial backups.</p>
+        <button class="btn-primary" id="s-export-min" style="width:100%;margin-bottom:8px">Export minimal .json</button>
+        <button class="btn-secondary" id="s-export-full" style="width:100%;margin-bottom:8px">Export full .json</button>
+        <button class="btn-secondary" id="s-import-btn" style="width:100%;margin-bottom:8px">Import .json</button>
+        <button class="btn-secondary" id="s-import-fvd-btn" style="width:100%;margin-bottom:8px">Import FVD Speed Dial</button>
+        <textarea id="s-import-fvd-text" class="field" rows="5" style="resize:vertical;font-size:12px;font-family:monospace;line-height:1.5;margin-bottom:8px" placeholder="Paste FVD JSON or text here"></textarea>
+        <button class="btn-secondary" id="s-import-fvd-text-btn" style="width:100%;margin-bottom:16px">Import pasted FVD text</button>
+        <button class="btn-cloud" id="s-cloud-save" style="width:100%;margin-bottom:8px">Save to Chrome Cloud</button>
+        <button class="btn-secondary" id="s-cloud-load" style="width:100%;margin-bottom:8px">Load from Chrome Cloud</button>
+        <button class="btn-secondary" id="s-cloud-clear" style="width:100%;margin-bottom:16px">Clear Cloud Backup</button>
+        <button class="btn-danger" id="s-reset" style="width:100%">Reset all data</button>
+      </div>
     </div>
-    <div class="row-btns" style="margin-top:24px">
+    </div>
+    <div class="settings-footer">
+      <span class="settings-version">v<!-- --></span>
+      <div class="row-btns" style="margin-top:24px">
       <button class="btn-secondary" id="s-cancel">Cancel</button>
       <button class="btn-primary" id="s-save">Save Settings</button>
+      </div>
     </div>
   </div>
 </div>
@@ -467,7 +528,12 @@
 
 <div id="speedtest-panel" style="display:none">
   <button id="speedtest-panel-close" title="Close SpeedTest">✕</button>
-  <iframe id="speedtest-frame" title="DialSpace SpeedTest" loading="lazy"></iframe>
+  <iframe id="speedtest-frame" title="SpaceDial SpeedTest" loading="lazy"></iframe>
+</div>
+
+<div id="ai-panel" style="display:none">
+  <button id="ai-panel-close" title="Close AI Chat">✕</button>
+  <iframe id="ai-frame" title="SpaceDial AI Chat" loading="lazy"></iframe>
 </div>
 
 <script src="newtab.js"></script>

@@ -1,14 +1,14 @@
-# DialSpace
+# SpaceDial
 
 > Space-inspired speed dial new tab for Chrome and Firefox — with groups, widgets, music, notes, and focus mode.
 
-![DialSpace](icons/icon128.png)
+![SpaceDial](icons/icon128.png)
 
 ---
 
 ## Overview
 
-DialSpace replaces your browser's new tab page with a fully-featured, space-themed start screen. Every element is designed to stay out of your way until you need it, while giving you fast access to your most-used sites, a live clock and weather feed, a music player, a scratchpad, and a focus timer that actually blocks distractions.
+SpaceDial replaces your browser's new tab page with a fully-featured, space-themed start screen. Every element is designed to stay out of your way until you need it, while giving you fast access to your most-used sites, a live clock and weather feed, a music player, a scratchpad, and a focus timer that actually blocks distractions.
 
 ---
 
@@ -48,7 +48,7 @@ DialSpace replaces your browser's new tab page with a fully-featured, space-them
 
 ### Import / Export
 - Export the full state as a JSON backup file
-- Import native DialSpace backups
+- Import native SpaceDial backups
 - Import **FVD Speed Dial** backups (auto-detected)
 - Auto-backup prompt — triggers when the state changes significantly and reminds you to save
 
@@ -64,7 +64,7 @@ DialSpace replaces your browser's new tab page with a fully-featured, space-them
 1. Clone or download this repository.
 2. Open `chrome://extensions` and enable **Developer mode**.
 3. Click **Load unpacked** and select the extension folder.
-4. Open a new tab — DialSpace loads automatically.
+4. Open a new tab — SpaceDial loads automatically.
 
 ### Firefox (temporary)
 1. Open `about:debugging#/runtime/this-firefox`.
@@ -77,7 +77,7 @@ DialSpace replaces your browser's new tab page with a fully-featured, space-them
 ## File Structure
 
 ```
-dialspace/
+spacedial/
 ├── manifest.json       # Extension manifest (MV3)
 ├── newtab.html         # Main new tab page
 ├── newtab.js           # All UI logic (~2 500 lines)
@@ -135,7 +135,7 @@ There are no global keyboard shortcuts defined. All interaction is mouse-driven.
 
 ## Data & Privacy
 
-DialSpace stores everything locally in `chrome.storage.local` by default. No data is sent to any external server. Weather requests go directly to the [Open-Meteo](https://open-meteo.com/) public API using only the city name you provide. Favicon lookups use the `favicone.com` proxy or DuckDuckGo's favicon service.
+SpaceDial stores everything locally in `chrome.storage.local` by default. No data is sent to any external server. Weather requests go directly to the [Open-Meteo](https://open-meteo.com/) public API using only the city name you provide. Favicon lookups use the `favicone.com` proxy or DuckDuckGo's favicon service.
 
 ---
 
