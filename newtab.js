@@ -3454,6 +3454,35 @@ function bindAll() {
     }
   });
   document.getElementById('s-reset').addEventListener('click', doReset);
+  document.getElementById('s-check-update').addEventListener('click', async () => {
+    const statusEl = document.getElementById('s-update-status');
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = 'var(--muted)';
+    try {
+      const repoUrl = chrome.runtime.getManifest().homepage_url || 'https://github.com/Tamp1x/SpaceDial';
+      const apiRepo = repoUrl.replace('https://github.com/', '').replace(/\/$/, '');
+      const ac = new AbortController();
+      const to = setTimeout(() => ac.abort(), 10000);
+      const res = await fetch(`https://api.github.com/repos/${apiRepo}/releases/latest`, { signal: ac.signal });
+      clearTimeout(to);
+      if (!res.ok) { statusEl.textContent = 'Failed to check (rate limit?)'; statusEl.style.color = 'var(--danger)'; return; }
+      const data = await res.json();
+      if (data.tag_name) {
+        const remote = data.tag_name.replace(/^v/, '');
+        const local = chrome.runtime.getManifest().version;
+        if (remote !== local) {
+          statusEl.innerHTML = `Update available: ${data.tag_name} <a href="${data.html_url || repoUrl + '/releases/latest'}" target="_blank" style="color:var(--accent)">Download</a>`;
+          statusEl.style.color = 'var(--accent)';
+        } else {
+          statusEl.textContent = `Up to date (${local})`;
+          statusEl.style.color = 'rgba(100,255,130,0.6)';
+        }
+      }
+    } catch(e) {
+      statusEl.textContent = 'Check failed';
+      statusEl.style.color = 'var(--danger)';
+    }
+  });
   document.getElementById('s-cloud-save').addEventListener('click', doCloudSave);
   document.getElementById('s-cloud-load').addEventListener('click', doCloudLoad);
   document.getElementById('s-cloud-clear').addEventListener('click', doCloudClear);
