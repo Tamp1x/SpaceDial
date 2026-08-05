@@ -10,8 +10,9 @@ const DEFAULT_STATE = () => ({
   ],
   activeGroup: 'home',
   settings: {
+    theme: 'default',
+    liquidVariant: 'light',
     bgType: 'night',
-    bgColor: '#07070e',
     autoDayNight: false,
     weatherEffect: 'clear',
     autoWeather: false,
@@ -25,6 +26,8 @@ const DEFAULT_STATE = () => ({
     showFooter: true,
     hoverZoom: true,
     glass: true,
+    glassStyle: 'standard',
+    tabStyle: 'default',
     showBorder: true,
     dialIconScale: 100,
     showAddDialButton: true,
@@ -80,6 +83,7 @@ function getIconScale(value, fallback = 100) {
 let ctxHideTimer = null;
 let starsAnimationFrame = null;
 let weatherAnimationFrame = null;
+let galaxyAnimationFrame = null;
 let starsResizeTimer = null;
 let lastWeatherAtmosphere = null;
 const MODAL_CLOSE_MS = 280;
@@ -102,6 +106,21 @@ let dragHoverTimer = null;
 let dragHoverTabId = null;
 let dragDropIndicator = null;
 
+// ─── Dev logs capture ────────────────────────────────────────
+const devLogs = [];
+['log', 'info', 'warn', 'error'].forEach(k => {
+  const orig = console[k].bind(console);
+  console[k] = (...args) => {
+    devLogs.push({
+      type: k,
+      time: new Date().toLocaleTimeString(),
+      msg: args.map(a => { try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch { return String(a); } }).join(' ')
+    });
+    if (devLogs.length > 500) devLogs.shift();
+    orig(...args);
+  };
+});
+
 // ─── Notes debounce ────────────────────────────────────────
 let notesSaveTimer = null;
 let autoBackupTimer = null;
@@ -122,8 +141,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   showView(state.activeGroup);
   startClock();
   fetchWeather();
-  drawStars();
+  if (getResolvedTheme() === 'galaxy') drawGalaxyStars(); else if (getResolvedTheme() === 'default') drawStars();
+  trackGalaxyMouse();
+  initFabricHover();
   bindAll();
+  setupOfflineBanner();
   restorePlayer();
   restoreFocus();
   setInterval(fetchWeather, 15 * 60 * 1000);
@@ -250,6 +272,7 @@ async function loadState() {
         state.settings = { ...DEFAULT_STATE().settings, ...(saved.settings || {}) };
         state.settings.bgType = normalizeBgType(state.settings.bgType);
         state.settings.weatherEffect = normalizeWeatherEffect(state.settings.weatherEffect);
+        state.settings.liquidVariant = normalizeLiquidVariant(state.settings.liquidVariant);
         delete state.settings.bgImage;
         state.player = { ...DEFAULT_STATE().player, ...(saved.player || {}) };
         state.notes = saved.notes || ''; if (saved.lastWeatherAtmosphere !== undefined) { state.lastWeatherAtmosphere = saved.lastWeatherAtmosphere; lastWeatherAtmosphere = saved.lastWeatherAtmosphere; }
@@ -297,12 +320,16 @@ function normalizeGroupsWithHome(groups) {
 
 function normalizeBgType(value) {
   if (value === 'stars' || value === 'image') return 'night';
-  if (['night', 'sunrise', 'day', 'sunset', 'solid'].includes(value)) return value;
+  if (['night', 'sunrise', 'day', 'sunset'].includes(value)) return value;
   return 'night';
 }
 
 function normalizeWeatherEffect(value) {
   return ['clear', 'cloudy', 'rain', 'snow', 'fog'].includes(value) ? value : 'clear';
+}
+
+function normalizeLiquidVariant(value) {
+  return ['light', 'dark'].includes(value) ? value : 'light';
 }
 
 function getResolvedBgType() {
@@ -320,6 +347,7 @@ function getResolvedBgType() {
 }
 
 function getResolvedWeatherEffect() {
+  if (getResolvedTheme() !== 'default') return 'clear';
   if (state.settings.autoWeather) {
     if (lastWeatherAtmosphere?.effect) {
       return normalizeWeatherEffect(lastWeatherAtmosphere.effect);
@@ -335,6 +363,22 @@ function backgroundUsesStars(bgType = getResolvedBgType()) {
   return bgType === 'night' || bgType === 'sunset';
 }
 
+function normalizeTheme(value) {
+  if (value === 'auto') return 'default';
+  if (['default', 'liquid', 'galaxy'].includes(value)) return value;
+  return 'default';
+}
+function getResolvedTheme() {
+  return normalizeTheme(state.settings.theme);
+}
+function isGalaxyTheme() {
+  return getResolvedTheme() === 'galaxy';
+}
+function isFixedWallpaperTheme() {
+  const t = getResolvedTheme();
+  return t === 'liquid';
+}
+
 // ─── Apply settings to DOM ──────────────────────────────────
 function applySettings(initial) {
   const s = state.settings;
@@ -344,6 +388,7 @@ function applySettings(initial) {
   const bgLayer = document.getElementById('bg-layer');
   const weatherLayer = document.getElementById('weather-layer');
   const starsCanvas = document.getElementById('stars-canvas');
+  const galaxyCanvas = document.getElementById('galaxy-canvas');
   
   if (initial) {
     bgLayer.style.transition = 'none';
@@ -355,15 +400,24 @@ function applySettings(initial) {
     if (tabBar) tabBar.style.transition = '';
   }
 
-  const bgType = getResolvedBgType();
-  const weatherEffect = getResolvedWeatherEffect();
+  const theme = getResolvedTheme();
+  const galaxy = theme === 'galaxy';
+  const fixedBg = theme === 'liquid';
+  const bgType = galaxy ? 'galaxy' : (fixedBg ? theme : getResolvedBgType());
+  const weatherEffect = (galaxy || fixedBg) ? 'clear' : getResolvedWeatherEffect();
   root.dataset.bg = bgType;
   root.dataset.weather = weatherEffect;
-  if (bgType === 'solid') {
-    root.dataset.bg = 'solid';
-    bgLayer.className = '';
+  root.dataset.theme = theme;
+  root.dataset.liquidVariant = theme === 'liquid' ? (s.liquidVariant || 'light') : '';
+  if (galaxy) {
+    bgLayer.className = 'bg-galaxy';
     weatherLayer.className = '';
-    bgLayer.style.background = s.bgColor;
+    bgLayer.style.background = '';
+    bgLayer.style.backgroundImage = '';
+  } else if (fixedBg) {
+    bgLayer.className = `bg-${theme}`;
+    weatherLayer.className = '';
+    bgLayer.style.background = '';
     bgLayer.style.backgroundImage = '';
   } else {
     bgLayer.className = `bg-${bgType}`;
@@ -371,8 +425,9 @@ function applySettings(initial) {
     bgLayer.style.background = '';
     bgLayer.style.backgroundImage = '';
   }
-  starsCanvas.style.display = backgroundUsesStars(bgType) ? 'block' : 'none';
-  weatherLayer.style.display = weatherEffect === 'clear' || bgType === 'solid' ? 'none' : 'block';
+  if (galaxyCanvas) galaxyCanvas.style.display = galaxy ? 'block' : 'none';
+  starsCanvas.style.display = galaxy ? 'none' : (backgroundUsesStars(bgType) ? 'block' : 'none');
+  weatherLayer.style.display = weatherEffect === 'clear' ? 'none' : 'block';
 
   root.style.setProperty('--overlay-op', s.overlayOp);
   root.style.setProperty('--cols', s.cols);
@@ -382,6 +437,8 @@ function applySettings(initial) {
   const ratios = { wide: '16/9', square: '1/1', tall: '3/4' };
   root.style.setProperty('--dial-aspect', ratios[s.dialShape] || '16/9');
 
+  root.dataset.glass = s.glass ? (s.glassStyle || 'standard') : 'none';
+  root.dataset.tabStyle = s.tabStyle || 'default';
   // Dial appearance
   document.querySelectorAll('.dial-card:not(.dial-add)').forEach(c => {
     c.classList.toggle('no-border', !s.showBorder);
@@ -414,7 +471,8 @@ function applySettings(initial) {
   const notesArea = document.getElementById('notes-area');
   if (notesArea && initial) notesArea.value = state.notes || '';
 
-  if (backgroundUsesStars(bgType)) drawStars();
+  if (galaxy) drawGalaxyStars();
+  else if (theme === 'default' && backgroundUsesStars(bgType)) drawStars();
   drawWeatherEffect(weatherEffect);
   updateSpeedTestTheme();
 }
@@ -564,6 +622,110 @@ function drawStars() {
   starsAnimationFrame = requestAnimationFrame(render);
 }
 
+// ─── Galaxy theme ───────────────────────────────────────────
+let galaxyMouse = { x: -9999, y: -9999, active: false };
+function trackGalaxyMouse() {
+  window.addEventListener('mousemove', e => {
+    galaxyMouse.x = e.clientX;
+    galaxyMouse.y = e.clientY;
+    galaxyMouse.active = true;
+  });
+  window.addEventListener('mouseleave', () => { galaxyMouse.active = false; });
+}
+
+function initFabricHover() {
+  const root = document.documentElement;
+  let rafId = null;
+  let targetX = 50, targetY = 50;
+  let currentX = 50, currentY = 50;
+  function update() {
+    currentX += (targetX - currentX) * 0.08;
+    currentY += (targetY - currentY) * 0.08;
+    root.style.setProperty('--mx', currentX + '%');
+    root.style.setProperty('--my', currentY + '%');
+    if (Math.abs(targetX - currentX) > 0.01 || Math.abs(targetY - currentY) > 0.01) {
+      rafId = requestAnimationFrame(update);
+    } else {
+      rafId = null;
+    }
+  }
+  document.addEventListener('mousemove', e => {
+    targetX = (e.clientX / window.innerWidth) * 100;
+    targetY = (e.clientY / window.innerHeight) * 100;
+    if (!rafId) rafId = requestAnimationFrame(update);
+  });
+}
+function drawGalaxyStars() {
+  const c = document.getElementById('galaxy-canvas');
+  if (!c) return;
+  if (galaxyAnimationFrame) { cancelAnimationFrame(galaxyAnimationFrame); galaxyAnimationFrame = null; }
+  c.width = window.innerWidth;
+  c.height = window.innerHeight;
+  if (!isGalaxyTheme()) { c.style.display = 'none'; return; }
+
+  const ctx = c.getContext('2d');
+  const count = Math.min(150, Math.max(60, Math.round((c.width * c.height) / 15000)));
+  const REPEL_R = Math.max(90, c.width * 0.075);
+  const REPEL_STRENGTH = 54;
+  const stars = Array.from({ length: count }, () => ({
+    x: Math.random() * c.width,
+    y: Math.random() * c.height,
+    baseX: 0, baseY: 0, // set below
+    radius: Math.random() * 1.15 + 0.35,
+    alpha: Math.random() * 0.55 + 0.25,
+    twinkleSpeed: 0.001 + Math.random() * 0.0025,
+    twinkleOffset: Math.random() * Math.PI * 2,
+    ox: 0, oy: 0, // current repulsion offset
+    vx: 0, vy: 0
+  }));
+  stars.forEach(s => { s.baseX = s.x; s.baseY = s.y; });
+
+  function render(now) {
+    if (!isGalaxyTheme()) {
+      ctx.clearRect(0, 0, c.width, c.height);
+      galaxyAnimationFrame = null;
+      return;
+    }
+    ctx.clearRect(0, 0, c.width, c.height);
+
+    for (const star of stars) {
+      // compute target repulsion offset
+      let tx = 0, ty = 0;
+      if (galaxyMouse.active || galaxyMouse.x !== -9999) {
+        const dx = star.baseX - galaxyMouse.x;
+        const dy = star.baseY - galaxyMouse.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < REPEL_R && dist > 0.001) {
+          const strength = REPEL_STRENGTH * (1 - dist / REPEL_R);
+          const inv = 1 / dist;
+          tx = dx * inv * strength;
+          ty = dy * inv * strength;
+        }
+      }
+      // spring physics toward target offset
+      star.vx += (tx - star.ox) * 0.06;
+      star.vy += (ty - star.oy) * 0.06;
+      star.vx *= 0.82;
+      star.vy *= 0.82;
+      star.ox += star.vx;
+      star.oy += star.vy;
+
+      const px = star.baseX + star.ox;
+      const py = star.baseY + star.oy;
+      const twinkle = 0.6 + ((Math.sin(now * star.twinkleSpeed + star.twinkleOffset) + 1) * 0.5) * 0.5;
+
+      ctx.beginPath();
+      ctx.arc(px, py, star.radius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(230,235,255,${Math.min(1, star.alpha * twinkle)})`;
+      ctx.fill();
+    }
+
+    galaxyAnimationFrame = requestAnimationFrame(render);
+  }
+
+  galaxyAnimationFrame = requestAnimationFrame(render);
+}
+
 // ─── Weather atmosphere ─────────────────────────────────────
 function drawWeatherEffect(effect = getResolvedWeatherEffect()) {
   const c = document.getElementById('weather-layer');
@@ -574,7 +736,7 @@ function drawWeatherEffect(effect = getResolvedWeatherEffect()) {
   c.width = window.innerWidth;
   c.height = window.innerHeight;
   const mode = normalizeWeatherEffect(effect);
-  if (mode === 'clear' || getResolvedBgType() === 'solid') {
+  if (mode === 'clear') {
     const ctx = c.getContext('2d');
     ctx.clearRect(0, 0, c.width, c.height);
     c.style.display = 'none';
@@ -604,7 +766,7 @@ function drawWeatherEffect(effect = getResolvedWeatherEffect()) {
   }
 
   function render(now) {
-    if (normalizeWeatherEffect(getResolvedWeatherEffect()) !== mode || getResolvedBgType() === 'solid') {
+    if (normalizeWeatherEffect(getResolvedWeatherEffect()) !== mode) {
       ctx.clearRect(0, 0, c.width, c.height);
       weatherAnimationFrame = null;
       return;
@@ -2075,10 +2237,14 @@ function openSettings(triggerEl) {
   const s = state.settings;
   s.bgType = normalizeBgType(s.bgType);
   s.weatherEffect = normalizeWeatherEffect(s.weatherEffect);
+  const themeRadio = document.querySelector(`input[name="theme"][value="${getResolvedTheme()}"]`);
+  if (themeRadio) themeRadio.checked = true;
   const bgRadio = document.querySelector(`input[name="bg-type"][value="${s.bgType}"]`);
   if (bgRadio) bgRadio.checked = true;
-  document.getElementById('bg-color-inp').value = s.bgColor;
-  document.getElementById('s-bg-color').style.display = s.bgType === 'solid' ? 'block' : 'none';
+  document.getElementById('s-auto-options').style.display = getResolvedTheme() === 'default' ? 'block' : 'none';
+  document.getElementById('s-liquid-variant-wrap').style.display = getResolvedTheme() === 'liquid' ? 'block' : 'none';
+  const lvRadio = document.querySelector(`input[name="liquid-variant"][value="${s.liquidVariant || 'light'}"]`);
+  if (lvRadio) lvRadio.checked = true;
   document.getElementById('s-auto-daynight').checked = !!s.autoDayNight;
   document.getElementById('s-weather-effect').value = s.weatherEffect;
   document.getElementById('s-auto-weather').checked = !!s.autoWeather;
@@ -2091,6 +2257,8 @@ function openSettings(triggerEl) {
   document.getElementById('s-show-footer').checked = s.showFooter;
   document.getElementById('s-hover-zoom').checked = s.hoverZoom;
   document.getElementById('s-glass').checked = s.glass;
+  document.getElementById('s-glass-style').value = s.glassStyle || 'standard';
+  document.getElementById('s-tab-style').value = s.tabStyle || 'default';
   document.getElementById('s-border').checked = s.showBorder;
   document.getElementById('s-show-add-dial').checked = s.showAddDialButton;
   document.getElementById('s-dial-icon-scale').value = String(s.dialIconScale ?? 100);
@@ -2125,10 +2293,123 @@ function openSettings(triggerEl) {
 }
 function closeSettings() { closeOverlay('modal-settings'); }
 
+// ─── Developer menu ─────────────────────────────────────────
+const DEV_FILES = ['manifest.json', 'newtab.html', 'newtab.css', 'newtab.js', 'ai.html', 'ai.js', 'ai.css', 'blocked.html', 'blocked.js', 'milkyway.jpg', 'liquid-dark.jpg', 'liquid-light.jpg', 'Anurati-Regular.woff'];
+function openDevMenu() {
+  document.getElementById('dev-logs').value = devLogs.length
+    ? devLogs.map(l => `[${l.time}] ${l.type.toUpperCase()} ${l.msg}`).join('\n')
+    : '(no logs captured yet)';
+  getLiveVersion().then(v => { document.getElementById('dev-version').textContent = 'v' + v; });
+  document.getElementById('dev-integrity').textContent = '';
+  openOverlay('modal-dev');
+}
+function closeDevMenu() { closeOverlay('modal-dev'); }
+function copyDevLogs() {
+  const t = document.getElementById('dev-logs').value;
+  if (navigator.clipboard) navigator.clipboard.writeText(t);
+}
+async function runIntegrityCheck() {
+  const out = document.getElementById('dev-integrity');
+  out.textContent = 'Checking…';
+  const results = [];
+  for (const f of DEV_FILES) {
+    try {
+      const res = await fetch(chrome.runtime.getURL(f));
+      if (res.ok) {
+        const buf = await res.arrayBuffer();
+        results.push(`✓ ${f} — ${buf.byteLength} B`);
+      } else {
+        results.push(`✗ ${f} — HTTP ${res.status}`);
+      }
+    } catch (e) {
+      results.push(`✗ ${f} — ${e.message}`);
+    }
+  }
+  out.textContent = results.join('\n');
+}
+
+async function runSelfTest() {
+  const out = document.getElementById('dev-integrity');
+  out.textContent = 'Running self test…';
+  const results = [];
+  const add = (name, ok, detail) => results.push({ name, ok, detail });
+
+  try { add('chrome.runtime', !!(chrome && chrome.runtime && chrome.runtime.getURL), ''); }
+  catch (e) { add('chrome.runtime', false, e.message); }
+  try { add('chrome.storage', !!chrome?.storage?.local, ''); }
+  catch (e) { add('chrome.storage', false, e.message); }
+
+  try {
+    const m = chrome.runtime.getManifest();
+    add('manifest', !!(m && m.version && m.name), 'v' + m.version);
+  } catch (e) { add('manifest', false, e.message); }
+
+  try {
+    const v = await getLiveVersion();
+    add('live version', /^\d+\.\d+\.\d+(\.\d+)?$/.test(v), 'v' + v);
+  } catch (e) { add('live version', false, e.message); }
+
+  let fontOk = false;
+  try { fontOk = !!document.fonts && document.fonts.check('16px Anurati'); } catch {}
+  add('Anurati font', fontOk, fontOk ? 'loaded' : 'not loaded');
+
+  const domIds = ['bg-layer', 'tab-bar', 'tabs-list', 'dials-grid', 'clock-block', 'weather-block', 'notes-block', 'player-block', 'modal-settings', 'ctx-menu', 'ai-panel', 'speedtest-panel', 'galaxy-canvas'];
+  const missingDom = domIds.filter(id => !document.getElementById(id));
+  add('DOM elements', missingDom.length === 0, missingDom.length ? 'missing: ' + missingDom.join(', ') : `${domIds.length} present`);
+
+  try {
+    const sc = document.getElementById('stars-canvas');
+    const gc = document.getElementById('galaxy-canvas');
+    add('canvas 2d', !!(sc?.getContext('2d') || gc?.getContext('2d')), '');
+  } catch (e) { add('canvas 2d', false, e.message); }
+
+  let stateOk = false, schemaDetail = '(no ds2 stored)';
+  try {
+    const raw = (await chrome.storage.local.get('ds2'))['ds2'];
+    if (raw) {
+      const s = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      stateOk = !!(s.settings && Array.isArray(s.groups));
+      const dialCount = (s.groups || []).reduce((acc, g) => acc + (g.dials || []).filter(d => d.type !== 'folder').length, 0);
+      schemaDetail = `settings:${s.settings ? 'ok' : 'missing'}, groups:${Array.isArray(s.groups) ? s.groups.length : 'missing'}, dials:${dialCount}`;
+    }
+    add('state schema', stateOk, schemaDetail);
+  } catch (e) { add('state schema', false, e.message); }
+
+  try {
+    const bytes = await chrome.storage.local.getBytesInUse(null);
+    add('storage usage', bytes >= 0, (bytes / 1024).toFixed(1) + ' KB');
+  } catch (e) { add('storage usage', false, e.message); }
+
+  add('groups', state.groups.length > 0, `${state.groups.length} groups, active=${state.activeGroup ?? '?'}`);
+  add('theme', !!getResolvedTheme(), getResolvedTheme());
+  add('weather widget', !!document.getElementById('weather-current'), lastWeatherAtmosphere ? `last=${lastWeatherAtmosphere.phase}/${lastWeatherAtmosphere.effect}` : 'no data yet');
+
+  let key = null;
+  try { key = await loadAiApiKey(); } catch {}
+  add('AI API key', !!key, key ? 'configured' : 'not set');
+
+  add('network', navigator.onLine, navigator.onLine ? 'online' : 'offline');
+  add('clipboard API', !!navigator.clipboard, '');
+
+  const missingFiles = [];
+  for (const f of DEV_FILES) {
+    try { const r = await fetch(chrome.runtime.getURL(f)); if (!r.ok) missingFiles.push(f); }
+    catch { missingFiles.push(f); }
+  }
+  add('bundled files', missingFiles.length === 0, missingFiles.length ? 'missing: ' + missingFiles.join(', ') : DEV_FILES.length + ' files ok');
+
+  const clockText = document.querySelector('#clock-block')?.textContent?.trim() || '';
+  add('clock', clockText.length > 0, clockText.slice(0, 20));
+
+  const fail = results.filter(r => !r.ok).length;
+  out.textContent = results.map(r => (r.ok ? '✓ ' : '✗ ') + r.name + (r.detail ? ' — ' + r.detail : '')).join('\n') + `\n\n${results.length - fail} OK, ${fail} FAILED`;
+}
+
 async function saveSettings() {
   const s = state.settings;
+  s.theme = document.querySelector('input[name="theme"]:checked').value || 'default';
+  s.liquidVariant = document.querySelector('input[name="liquid-variant"]:checked')?.value || 'light';
   s.bgType = normalizeBgType(document.querySelector('input[name="bg-type"]:checked').value);
-  s.bgColor = document.getElementById('bg-color-inp').value;
   s.autoDayNight = document.getElementById('s-auto-daynight').checked;
   s.weatherEffect = normalizeWeatherEffect(document.getElementById('s-weather-effect').value);
   s.autoWeather = document.getElementById('s-auto-weather').checked;
@@ -2140,6 +2421,8 @@ async function saveSettings() {
   s.showFooter = document.getElementById('s-show-footer').checked;
   s.hoverZoom = document.getElementById('s-hover-zoom').checked;
   s.glass = document.getElementById('s-glass').checked;
+  s.glassStyle = document.getElementById('s-glass-style').value || 'standard';
+  s.tabStyle = document.getElementById('s-tab-style').value || 'default';
   s.showBorder = document.getElementById('s-border').checked;
   s.showAddDialButton = document.getElementById('s-show-add-dial').checked;
   s.dialIconScale = getIconScale(parseInt(document.getElementById('s-dial-icon-scale').value, 10));
@@ -2237,7 +2520,10 @@ function openAI() {
   document.getElementById('ai-panel').classList.toggle('open', aiPanelOpen);
   document.getElementById('ai-panel').style.display = aiPanelOpen ? 'block' : 'none';
   if (aiPanelOpen) {
-    document.getElementById('ai-frame').src = 'ai.html?new=' + Date.now();
+    document.getElementById('ai-frame').src = 'ai.html?new=' + Date.now() +
+      '&theme=' + encodeURIComponent(getResolvedTheme()) +
+      '&glass=' + encodeURIComponent(state.settings.glass ? (state.settings.glassStyle || 'standard') : 'none') +
+      '&liquidVariant=' + encodeURIComponent(state.settings.liquidVariant || 'light');
   }
 }
 function closeAI() {
@@ -3378,6 +3664,19 @@ function bindAll() {
   document.getElementById('settings-btn').addEventListener('click', e => openSettings(e.currentTarget));
   document.getElementById('s-cancel').addEventListener('click', closeSettings);
   document.getElementById('s-save').addEventListener('click', saveSettings);
+  let versionClicks = 0, versionClickTimer = null;
+  document.getElementById('s-version').addEventListener('click', () => {
+    versionClicks++;
+    clearTimeout(versionClickTimer);
+    versionClickTimer = setTimeout(() => { versionClicks = 0; }, 2000);
+    if (versionClicks >= 10) { versionClicks = 0; openDevMenu(); }
+  });
+  document.getElementById('dev-close').addEventListener('click', closeDevMenu);
+  document.getElementById('dev-reload').addEventListener('click', () => location.reload());
+  document.getElementById('dev-copy').addEventListener('click', copyDevLogs);
+  document.getElementById('dev-integrity-btn').addEventListener('click', runIntegrityCheck);
+  document.getElementById('dev-selftest-btn').addEventListener('click', runSelfTest);
+  document.getElementById('modal-dev').addEventListener('mousedown', e => { if (e.target === e.currentTarget) closeDevMenu(); });
   document.getElementById('modal-settings').addEventListener('mousedown', e => { if (e.target === e.currentTarget) closeSettings(); });
   document.querySelectorAll('.settings-nav-btn').forEach(btn => {
     btn.addEventListener('click', () => switchSettingsSection(btn.dataset.section));
@@ -3410,8 +3709,13 @@ function bindAll() {
   });
 
   document.querySelectorAll('input[name="bg-type"]').forEach(r => r.addEventListener('change', () => {
-    document.getElementById('s-bg-color').style.display = r.value === 'solid' && r.checked ? 'block' : 'none';
     if (r.checked) document.getElementById('s-auto-daynight').checked = false;
+  }));
+  document.querySelectorAll('input[name="theme"]').forEach(r => r.addEventListener('change', () => {
+    if (r.checked) {
+      document.getElementById('s-auto-options').style.display = r.value === 'default' ? 'block' : 'none';
+      document.getElementById('s-liquid-variant-wrap').style.display = r.value === 'liquid' ? 'block' : 'none';
+    }
   }));
   document.getElementById('s-weather-effect').addEventListener('change', () => {
     document.getElementById('s-auto-weather').checked = false;
@@ -3691,7 +3995,8 @@ function bindAll() {
   window.addEventListener('resize', () => {
     clearTimeout(starsResizeTimer);
     starsResizeTimer = setTimeout(() => {
-      if (backgroundUsesStars()) drawStars();
+      if (getResolvedTheme() === 'galaxy') drawGalaxyStars();
+      else if (getResolvedTheme() === 'default' && backgroundUsesStars()) drawStars();
       drawWeatherEffect();
     }, 120);
   });
@@ -3705,6 +4010,27 @@ async function getLiveVersion() {
     return m.version || chrome.runtime.getManifest().version;
   } catch { return chrome.runtime.getManifest().version; }
 }
+function setupOfflineBanner() {
+  const banner = document.getElementById('offline-banner');
+  if (!banner) return;
+  const update = () => {
+    banner.style.display = navigator.onLine ? 'none' : 'flex';
+  };
+  window.addEventListener('offline', update);
+  window.addEventListener('online', update);
+  update();
+}
+
+function compareVersions(a, b) {
+  const pa = String(a).split('.').map(Number);
+  const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0, nb = pb[i] || 0;
+    if (na !== nb) return na < nb ? -1 : 1;
+  }
+  return 0;
+}
+
 async function checkForUpdates() {
   try {
     const repoUrl = chrome.runtime.getManifest().homepage_url || 'https://github.com/Tamp1x/SpaceDial';
@@ -3718,7 +4044,7 @@ async function checkForUpdates() {
     if (data.tag_name) {
       const remoteVersion = data.tag_name.replace(/^v/, '');
       const localVersion = await getLiveVersion();
-      if (remoteVersion !== localVersion && remoteVersion !== state.ignoredUpdate) {
+      if (compareVersions(remoteVersion, localVersion) > 0 && remoteVersion !== state.ignoredUpdate) {
         const msg = document.getElementById('update-toast-msg');
         if (msg) msg.textContent = `Update ${data.tag_name}`;
         document.getElementById('update-toast-download').onclick = () => {

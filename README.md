@@ -49,16 +49,25 @@
 - Session persists across browser restarts via `session` storage
 
 ### Appearance
-- Animated Night, Sunrise, Day, Sunset atmosphere modes + solid colour
+- **Theme switcher**: **Default** (time of day + weather), **MacOS** (flowing wallpapers with light/dark variants) or **Galaxy**
+- Galaxy theme — real Milky Way panorama (ESO, CC BY 4.0) with OLED-black space, a few subtle twinkling stars that drift away from your cursor, and the panorama extending behind the top bar
+- For Galaxy and MacOS themes the wallpaper/weather options are hidden and ignored; panels turn black in Galaxy
+- Animated Night, Sunrise, Day, Sunset atmosphere modes (Default theme)
+- Glass finish: **Standard**, **Liquid Glass** (bright, strongly blurred, high saturation) or **Tinted Glass** (darker, more muted) — applies to dials, widgets, panels, context menus, top bar and the AI chat
+- Tab switcher style: **Default (3D glass)**, **Flat (no 3D)**, **Liquid** or **Tinted** — same slide animation, different pill design
 - Optional automatic day/night switching via Open-Meteo sunrise/sunset data
 - Weather effects: clouds, rain, snow, fog (manual or auto)
 - Glassmorphism card style, hover zoom, border visibility, adjustable columns and icon scale
 - Show/hide top bar buttons (add group, focus mode, speed test, AI)
+- Bundled Anurati font (no CDN, no 404s)
 
 ### Updates
-- Automatic check for new versions on startup
+- Automatic check for new versions on startup (only offered when GitHub version is newer than installed)
 - Toast notification when update is available — Later (dismiss) or Download (opens GitHub releases)
 - Settings **Updates** tab shows current version and a manual check button
+
+### Hidden Developer menu
+- Click the version label in the Settings footer (left of Cancel / Save Settings) **10 times** to open a hidden developer panel with captured console logs, an integrity check for bundled files, copy-logs and reload buttons
 
 ### Backup & Sync
 - Export minimal (dials + settings) or full (everything) JSON backup
@@ -82,10 +91,12 @@
 
 ```
 SpaceDial/
-├── manifest.json          # Extension manifest (MV3, v4.7.0)
+├── manifest.json          # Extension manifest (MV3, v4.8.0)
 ├── newtab.html            # Main new tab page
 ├── newtab.js              # All UI logic + settings
 ├── newtab.css             # All styles
+├── Anurati-Regular.woff   # Bundled display font (no CDN)
+├── milkyway.jpg           # Galaxy theme Milky Way panorama (ESO, CC BY 4.0)
 ├── ai.html                # AI chat panel (loaded in iframe)
 ├── ai.js                  # AI chat logic — streaming, tools, encryption
 ├── ai.css                 # AI panel styles
@@ -123,8 +134,8 @@ Settings are organised into **Appearance**, **Dials**, **Widgets**, **Music & Fo
 
 | Setting | Tab | Default | Description |
 |---|---|---|---|
-| Background type | Appearance | Night | `night`, `sunrise`, `day`, `sunset`, `solid` |
-| Solid colour | Appearance | #07070e | Background when type is `solid` |
+| Theme | Appearance | Default | `default`, `liquid` (MacOS — flowing wallpapers with light/dark variants) or `galaxy` (Milky Way) — non-default themes hide wallpaper/weather options |
+| Background type | Appearance | Night | `night`, `sunrise`, `day`, `sunset` |
 | Auto day/night | Appearance | Off | Uses Open-Meteo sunrise/sunset |
 | Weather effect | Appearance | Clear | `clear`, `cloudy`, `rain`, `snow`, `fog` |
 | Auto weather | Appearance | Off | Uses Open-Meteo current weather |
@@ -139,6 +150,8 @@ Settings are organised into **Appearance**, **Dials**, **Widgets**, **Music & Fo
 | Show footer | Dials | On | Bottom info bar |
 | Hover zoom | Dials | On | |
 | Glass effect | Dials | On | Glassmorphism cards |
+| Glass finish | Dials | Standard | `standard`, `liquid`, or `tinted` |
+| Tab switcher style | Appearance | Default | `default` (3D), `flat`, `liquid`, or `tinted` |
 | Dial border | Dials | On | |
 | Show ADD DIAL | Dials | On | "+" card |
 | Clock format | Widgets | 24h | 12h or 24h |

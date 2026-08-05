@@ -10,10 +10,14 @@
 </head>
 <body>
 
+<div id="offline-banner" style="display:none">⚠ Offline — some features (weather, AI, icons, updates) may not work</div>
+
 <canvas id="stars-canvas"></canvas>
+<canvas id="galaxy-canvas"></canvas>
 <div id="bg-layer"></div>
 <canvas id="weather-layer"></canvas>
 <div id="bg-overlay"></div>
+<div id="fabric-overlay"></div>
 
 <div id="tab-bar">
   <div id="tabs-scroll"><div id="tabs-list"></div></div>
@@ -279,15 +283,35 @@
     <div class="settings-grid">
       <div class="s-section active" data-section="appearance">
         <div class="s-section-title">Appearance</div>
-        <label class="field-label">Wallpaper</label>
+        <label class="field-label">Theme</label>
+        <div class="radio-group">
+          <label class="rl"><input type="radio" name="theme" value="default" checked> Default</label>
+          <label class="rl"><input type="radio" name="theme" value="liquid"> MacOS</label>
+          <label class="rl"><input type="radio" name="theme" value="galaxy"> Galaxy</label>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.04em">MacOS uses flowing wallpapers with a light/dark variant selector and a fabric-fold hover effect. Galaxy shows a real Milky Way panorama with twinkling stars that drift away from your cursor.</p>
+        <div id="s-liquid-variant-wrap" style="display:none;margin-top:10px">
+          <label class="field-label">Liquid variant</label>
+          <div class="radio-group">
+            <label class="rl"><input type="radio" name="liquid-variant" value="light" checked> Light</label>
+            <label class="rl"><input type="radio" name="liquid-variant" value="dark"> Dark</label>
+          </div>
+        </div>
+        <label class="field-label" style="margin-top:14px">Tab switcher style</label>
+        <select id="s-tab-style" class="field">
+          <option value="default" selected>Default (3D glass)</option>
+          <option value="flat">Flat (no 3D)</option>
+          <option value="liquid">Liquid Glass</option>
+          <option value="tinted">Tinted Glass</option>
+        </select>
+        <div id="s-auto-options">
+        <label class="field-label" style="margin-top:14px">Wallpaper</label>
         <div class="radio-group">
           <label class="rl"><input type="radio" name="bg-type" value="night" checked> Night</label>
           <label class="rl"><input type="radio" name="bg-type" value="sunrise"> Sunrise</label>
           <label class="rl"><input type="radio" name="bg-type" value="day"> Day</label>
           <label class="rl"><input type="radio" name="bg-type" value="sunset"> Sunset</label>
-          <label class="rl"><input type="radio" name="bg-type" value="solid"> Solid color</label>
         </div>
-        <div id="s-bg-color" style="display:none;margin-top:8px"><input type="color" id="bg-color-inp" value="#07070e"></div>
         <div class="toggle-row" style="margin-top:12px">
           <span>Auto day/night</span><label class="toggle"><input type="checkbox" id="s-auto-daynight"><span class="tog-slider"></span></label>
         </div>
@@ -301,6 +325,7 @@
         </select>
         <div class="toggle-row" style="margin-top:12px">
           <span>Auto weather</span><label class="toggle"><input type="checkbox" id="s-auto-weather"><span class="tog-slider"></span></label>
+        </div>
         </div>
         <label class="field-label" style="margin-top:14px">Overlay opacity <span id="overlay-val" style="color:var(--text);font-variant-numeric:tabular-nums">0.35</span></label>
         <input type="range" id="overlay-opacity" min="0" max="0.9" step="0.05" value="0.35" class="slider">
@@ -356,6 +381,12 @@
         <div class="toggle-row">
           <span>Glass style</span><label class="toggle"><input type="checkbox" id="s-glass" checked><span class="tog-slider"></span></label>
         </div>
+        <label class="field-label" style="margin-top:10px">Glass finish</label>
+        <select id="s-glass-style" class="field">
+          <option value="standard" selected>Standard</option>
+          <option value="liquid">Liquid Glass</option>
+          <option value="tinted">Tinted Glass</option>
+        </select>
         <div class="toggle-row">
           <span>Show border</span><label class="toggle"><input type="checkbox" id="s-border" checked><span class="tog-slider"></span></label>
         </div>
@@ -440,11 +471,33 @@
     </div>
     </div>
     <div class="settings-footer">
-      <span class="settings-version">v<!-- --></span>
+      <span class="settings-version" id="s-version">v<!-- --></span>
       <div class="row-btns" style="margin-top:24px">
       <button class="btn-secondary" id="s-cancel">Cancel</button>
       <button class="btn-primary" id="s-save">Save Settings</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Developer -->
+<div id="modal-dev" class="overlay-panel" style="display:none">
+  <div class="panel-box dev-box">
+    <div class="panel-title">Developer</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span id="dev-version" style="font-size:13px;color:var(--muted)">v</span>
+      <button class="btn-mini" id="dev-reload">Reload</button>
+    </div>
+    <label class="field-label">Logs</label>
+    <textarea id="dev-logs" readonly class="field" style="height:180px;font-family:Consolas,monospace;font-size:11px;white-space:pre;overflow:auto"></textarea>
+    <div class="row-btns" style="margin:8px 0">
+      <button class="btn-secondary" id="dev-copy">Copy logs</button>
+      <button class="btn-secondary" id="dev-integrity-btn">Integrity check</button>
+      <button class="btn-secondary" id="dev-selftest-btn">Self test</button>
+    </div>
+    <pre id="dev-integrity" style="max-height:140px;overflow:auto;font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-word"></pre>
+    <div class="settings-footer">
+      <button class="btn-secondary" id="dev-close">Close</button>
     </div>
   </div>
 </div>

@@ -735,6 +735,33 @@ async function sendMessage() {
 /* ─── URL param: ?new ─────────────────────────── */
 if (location.search.includes('new')) createNewChat();
 
+/* ─── Theme + glass finish from SpaceDial ─────── */
+(function applyThemeFromParams() {
+  function apply(theme, glass, liquidVariant) {
+    document.documentElement.dataset.glass = glass;
+    document.body.dataset.theme = theme;
+    document.body.dataset.liquidVariant = theme === 'liquid' ? (liquidVariant || 'light') : '';
+  }
+  const params = new URLSearchParams(location.search);
+  const qTheme = params.get('theme');
+  const qGlass = params.get('glass');
+  const qLv = params.get('liquidVariant');
+  if (qTheme || qGlass) { apply(qTheme || 'default', qGlass || 'none', qLv || 'light'); return; }
+  chrome.storage.local.get('ds2', (r) => {
+    let theme = 'default', glass = 'none', liquidVariant = 'light';
+    try {
+      const raw = r.ds2;
+      if (raw) {
+        const s = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (s.settings) theme = s.settings.theme || 'default';
+        if (s.settings) liquidVariant = s.settings.liquidVariant || 'light';
+        if (s.settings?.glass) glass = s.settings.glassStyle || 'standard';
+      }
+    } catch {}
+    apply(theme, glass, liquidVariant);
+  });
+})();
+
 /* ─── Init ────────────────────────────────────── */
 document.getElementById('ai-model-selector').addEventListener('click', toggleModelDropdown);
 document.addEventListener('click', e => { if (!e.target.closest('#ai-model-selector') && !e.target.closest('#ai-model-dropdown')) closeModelDropdown(); });

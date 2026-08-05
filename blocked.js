@@ -96,13 +96,13 @@
     }
   }
 
-  function drawWeatherEffect(effect, bgType) {
+  function drawWeatherEffect(effect) {
     const c = weatherCanvas;
     if (!c) return;
     if (weatherAnimationFrame) { cancelAnimationFrame(weatherAnimationFrame); weatherAnimationFrame = null; }
     c.width = window.innerWidth;
     c.height = window.innerHeight;
-    if (effect === 'clear' || bgType === 'solid') {
+    if (effect === 'clear') {
       c.getContext('2d').clearRect(0, 0, c.width, c.height);
       c.style.display = 'none';
       return;
@@ -281,7 +281,7 @@
   function applyAtmosphere() {
     const phase = getDayPhase();
     root.dataset.bg = phase;
-    bgLayer.className = phase === 'solid' ? '' : `bg-${phase}`;
+    bgLayer.className = `bg-${phase}`;
     drawStars(phase);
 
     chrome.storage.local.get(['ds2', 'ds2_lastWeather'], (r) => {
@@ -298,7 +298,7 @@
         }
       } catch {}
       root.dataset.weather = weather;
-      drawWeatherEffect(weather, phase);
+      drawWeatherEffect(weather);
     });
   }
 

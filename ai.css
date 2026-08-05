@@ -22,6 +22,7 @@ html, body {
   transition:width .22s cubic-bezier(.22,1,.36,1);
   flex-shrink:0;
   display:flex; flex-direction:column;
+  position:relative; z-index:1;
 }
 #ai-root.sidebar-open #ai-sidebar {
   width:200px;
@@ -110,7 +111,7 @@ html, body {
 /* ─── Main area ────────────────────────────────── */
 #ai-main {
   flex:1; display:flex; flex-direction:column;
-  min-width:0; position:relative;
+  min-width:0; position:relative; z-index:1;
   margin-left:0;
   transition:margin-left .22s cubic-bezier(.22,1,.36,1);
 }
@@ -538,3 +539,48 @@ html, body {
 ::-webkit-scrollbar { width:4px; }
 ::-webkit-scrollbar-track { background:transparent; }
 ::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.08); border-radius:2px; }
+
+/* ─── Glass finish (matches SpaceDial theme) ──── */
+body[data-theme="galaxy"] {
+  background:#000;
+}
+body[data-theme="liquid"] {
+  background: url('liquid-light.jpg') center/cover no-repeat, #efeafb;
+}
+body[data-theme="liquid"][data-liquid-variant="dark"] {
+  background-image: url('liquid-dark.jpg');
+}
+body[data-theme="default"] { background:transparent; }
+
+:root[data-glass="liquid"] #ai-main,
+:root[data-glass="liquid"] #ai-sidebar {
+  background:linear-gradient(145deg, rgba(255,255,255,0.16), rgba(255,255,255,0.04)) rgba(18,18,26,0.55);
+  backdrop-filter:blur(24px) saturate(1.6);
+}
+:root[data-glass="liquid"] #ai-header,
+:root[data-glass="liquid"] #ai-input-area {
+  background:rgba(18,18,26,0.35);
+  backdrop-filter:blur(24px) saturate(1.6);
+}
+:root[data-glass="liquid"] #ai-model-dropdown,
+:root[data-glass="liquid"] #ai-model-settings-popup {
+  background:linear-gradient(145deg, rgba(255,255,255,0.16), rgba(255,255,255,0.05)) rgba(18,18,26,0.6);
+  border-color:rgba(255,255,255,0.22);
+  backdrop-filter:blur(24px) saturate(1.6);
+}
+:root[data-glass="tinted"] #ai-main,
+:root[data-glass="tinted"] #ai-sidebar {
+  background:rgba(16,16,18,0.92);
+  backdrop-filter:blur(14px) saturate(1.05);
+}
+:root[data-glass="tinted"] #ai-header,
+:root[data-glass="tinted"] #ai-input-area {
+  background:rgba(16,16,18,0.75);
+  backdrop-filter:blur(14px) saturate(1.05);
+}
+:root[data-glass="tinted"] #ai-model-dropdown,
+:root[data-glass="tinted"] #ai-model-settings-popup {
+  background:rgba(16,16,18,0.95);
+  border-color:rgba(255,255,255,0.1);
+  backdrop-filter:blur(14px) saturate(1.05);
+}
