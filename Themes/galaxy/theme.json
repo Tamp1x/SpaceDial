@@ -1,0 +1,10 @@
+{
+  "id": "galaxy",
+  "name": "Galaxy",
+  "description": "3D solar-system viewer with Earth globe, Milky Way panorama and all planets with real textures",
+  "icon": "?",
+  "hasWallpapers": false,
+  "hasWeatherEffects": false,
+  "files": ["galaxy-theme.js", "mercury.jpg", "venus.jpg", "earth.jpg", "mars.jpg", "jupiter.jpg", "saturn.jpg", "saturn-ring.png", "uranus.jpg", "uranus-ring.png", "neptune.jpg", "blackhole-sgra.jpg", "blackhole-reference.png"],
+  "settings": ["galaxyPlanet", "weatherCity"]
+}

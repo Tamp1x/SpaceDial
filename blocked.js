@@ -96,7 +96,7 @@
     }
   }
 
-  function drawWeatherEffect(effect) {
+  function drawWeatherEffect(effect, phase) {
     const c = weatherCanvas;
     if (!c) return;
     if (weatherAnimationFrame) { cancelAnimationFrame(weatherAnimationFrame); weatherAnimationFrame = null; }
@@ -112,6 +112,7 @@
     const rand = (min, max) => min + Math.random() * (max - min);
     let particles;
     let lastTime = performance.now();
+    const bgType = phase;
 
     if (effect === 'rain') {
       const count = Math.min(450, Math.max(180, Math.round((c.width * c.height) / 5500)));
@@ -298,7 +299,7 @@
         }
       } catch {}
       root.dataset.weather = weather;
-      drawWeatherEffect(weather);
+      drawWeatherEffect(weather, phase);
     });
   }
 

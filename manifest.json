@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SpaceDial",
-  "version": "4.8.0",
+  "version": "4.9.0",
   "description": "Space-inspired speed dial new tab with widgets, groups, notes, weather, music and focus mode",
   "chrome_url_overrides": { "newtab": "newtab.html" },
   "permissions": ["storage", "notifications", "tabs", "downloads"],
@@ -39,7 +39,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["blocked.html", "newtab.html"],
+      "resources": ["blocked.html", "newtab.html", "Themes/earth/*", "Themes/galaxy/*", "Themes/milkyway/*", "Themes/macos/*", "wallpapers.json", "Themes/*/theme.json", "Wallpapers/*"],
       "matches": ["<all_urls>"]
     }
   ]

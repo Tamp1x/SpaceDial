@@ -12,7 +12,9 @@ const DEFAULT_STATE = () => ({
   settings: {
     theme: 'default',
     liquidVariant: 'light',
+    galaxyPlanet: 'earth',
     bgType: 'night',
+    bgTime: 12, // manual time-of-day for Default theme smooth sky (0..24)
     autoDayNight: false,
     weatherEffect: 'clear',
     autoWeather: false,
@@ -48,7 +50,13 @@ const DEFAULT_STATE = () => ({
     autoplay: false,
     loopPlaylist: true,
     shuffleOnStart: false,
-    blockedDomains: 'youtube.com\ntiktok.com\ntwitter.com\nx.com\ninstagram.com\nfacebook.com\nreddit.com\nnetflix.com\ntwitch.tv\ntumblr.com\npinterest.com'
+    blockedDomains: 'youtube.com\ntiktok.com\ntwitter.com\nx.com\ninstagram.com\nfacebook.com\nreddit.com\nnetflix.com\ntwitch.tv\ntumblr.com\npinterest.com',
+    wallpaper: null,
+    wallpaperFit: 'cover',
+    wallpaperZoom: 100,
+    wallpaperX: 50,
+    wallpaperY: 50,
+    wallpaperBlur: false
   },
   notes: '',
   player: {
@@ -107,19 +115,7 @@ let dragHoverTabId = null;
 let dragDropIndicator = null;
 
 // ─── Dev logs capture ────────────────────────────────────────
-const devLogs = [];
-['log', 'info', 'warn', 'error'].forEach(k => {
-  const orig = console[k].bind(console);
-  console[k] = (...args) => {
-    devLogs.push({
-      type: k,
-      time: new Date().toLocaleTimeString(),
-      msg: args.map(a => { try { return typeof a === 'object' ? JSON.stringify(a) : String(a); } catch { return String(a); } }).join(' ')
-    });
-    if (devLogs.length > 500) devLogs.shift();
-    orig(...args);
-  };
-});
+const devLogs = window.__devLogs || [];
 
 // ─── Notes debounce ────────────────────────────────────────
 let notesSaveTimer = null;
@@ -133,6 +129,8 @@ let backupPromptVisible = false;
 // ─── Init ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   await loadState();
+  installConsoleCommands();
+  sessionStorage.removeItem('dev-earth-override');
   // Establish baseline so prompt does not appear right after startup.
   lastBackupFingerprint = JSON.stringify(makeBackupFingerprintSource(state));
   setupOverlayPanels();
@@ -141,9 +139,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   showView(state.activeGroup);
   startClock();
   fetchWeather();
-  if (getResolvedTheme() === 'galaxy') drawGalaxyStars(); else if (getResolvedTheme() === 'default') drawStars();
+  if (isMilkywaySelected()) drawGalaxyStars(); else if (getResolvedTheme() === 'default') drawStars();
   trackGalaxyMouse();
   initFabricHover();
+  initWallpaperControls();
+  initEarthTimeControl();
+  initSkyTimeControl();
   bindAll();
   setupOfflineBanner();
   restorePlayer();
@@ -271,8 +272,18 @@ async function loadState() {
         state.activeGroup = saved.activeGroup || state.groups[0].id;
         state.settings = { ...DEFAULT_STATE().settings, ...(saved.settings || {}) };
         state.settings.bgType = normalizeBgType(state.settings.bgType);
+        const savedBgTime = Number(state.settings.bgTime);
+        state.settings.bgTime = Number.isFinite(savedBgTime)
+          ? Math.max(0, Math.min(24, savedBgTime))
+          : DEFAULT_STATE().settings.bgTime;
         state.settings.weatherEffect = normalizeWeatherEffect(state.settings.weatherEffect);
         state.settings.liquidVariant = normalizeLiquidVariant(state.settings.liquidVariant);
+        const oldTheme = state.settings.theme;
+        if (oldTheme === 'earth' || oldTheme === 'milkyway') {
+          state.settings.theme = 'galaxy';
+          state.settings.galaxyPlanet = oldTheme === 'earth' ? 'earth' : 'milkyway';
+        }
+        state.settings.galaxyPlanet = normalizeGalaxyBody(state.settings.galaxyPlanet);
         delete state.settings.bgImage;
         state.player = { ...DEFAULT_STATE().player, ...(saved.player || {}) };
         state.notes = saved.notes || ''; if (saved.lastWeatherAtmosphere !== undefined) { state.lastWeatherAtmosphere = saved.lastWeatherAtmosphere; lastWeatherAtmosphere = saved.lastWeatherAtmosphere; }
@@ -332,21 +343,64 @@ function normalizeLiquidVariant(value) {
   return ['light', 'dark'].includes(value) ? value : 'light';
 }
 
+function normalizeGalaxyBody(value) {
+  const legacyBlackHole = ['blackhole-m87', 'blackhole-sgra', 'blackhole-reference'];
+  if (legacyBlackHole.includes(value)) return 'blackhole';
+  const allowed = ['milkyway', 'earth', 'mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'blackhole'];
+  return allowed.includes(value) ? value : 'earth';
+}
+
+// Effective hour-of-day (0..24) used to render the Default smooth sky.
+// Auto = real local clock time; manual = settings.bgTime slider.
+function getResolvedSkyHour() {
+  if (state.settings.autoDayNight) {
+    const d = new Date();
+    return d.getHours() + d.getMinutes() / 60;
+  }
+  const t = Number(state.settings.bgTime);
+  return ((Number.isFinite(t) ? t : 12) % 24 + 24) % 24;
+}
+
 function getResolvedBgType() {
   if (state.settings.autoDayNight) {
     if (lastWeatherAtmosphere?.phase) {
       return normalizeBgType(lastWeatherAtmosphere.phase);
     }
-    const hour = new Date().getHours();
-    if (hour >= 5 && hour < 8) return 'sunrise';
-    if (hour >= 8 && hour < 18) return 'day';
-    if (hour >= 18 && hour < 21) return 'sunset';
-    return 'night';
+    return bgTypeFromHour(new Date().getHours() + new Date().getMinutes() / 60);
+  }
+  if (getResolvedTheme() === 'default' && !isFixedWallpaperTheme()) {
+    return bgTypeFromHour(getResolvedSkyHour());
   }
   return normalizeBgType(state.settings.bgType);
 }
 
+function bgTypeFromHour(hour) {
+  if (hour >= 5 && hour < 8) return 'sunrise';
+  if (hour >= 8 && hour < 17) return 'day';
+  if (hour >= 17 && hour < 20.5) return 'sunset';
+  return 'night';
+}
+
+function updateBgTimeLabel() {
+  const val = document.getElementById('s-bg-time');
+  const lbl = document.getElementById('s-bg-time-val');
+  if (!val || !lbl) return;
+  const h = parseFloat(val.value) || 0;
+  const hh = Math.floor(h);
+  const mm = Math.round((h - hh) * 60);
+  lbl.textContent = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+}
+
 function getResolvedWeatherEffect() {
+  if (isEarthSelected() || isMilkywaySelected()) {
+    if (isEarthSelected() && state.settings.autoWeather) {
+      if (lastWeatherAtmosphere?.effect) {
+        return normalizeWeatherEffect(lastWeatherAtmosphere.effect);
+      }
+      return 'clear';
+    }
+    return normalizeWeatherEffect(state.settings.weatherEffect);
+  }
   if (getResolvedTheme() !== 'default') return 'clear';
   if (state.settings.autoWeather) {
     if (lastWeatherAtmosphere?.effect) {
@@ -363,6 +417,202 @@ function backgroundUsesStars(bgType = getResolvedBgType()) {
   return bgType === 'night' || bgType === 'sunset';
 }
 
+// ─── Smooth sky (continuous time-of-day gradient) ──────────────
+// Palettes keyed by hour of day (local time). Between slices we
+// interpolate each RGB channel so the Default sky flows smoothly
+// from night → sunrise → day → sunset → night.
+const SKY_PALETTES = [
+  { h: 0,  top:[6,9,22],  midTop:[16,19,42], mid:[26,30,58], bot:[6,8,20], sun:[235,240,255], sunX:0.70, sunY:0.16, sunA:0.10, stars:true },
+  { h: 4.5, top:[8,12,28], midTop:[24,28,60], mid:[40,44,84], bot:[8,10,26], sun:[235,240,255], sunX:0.70, sunY:0.18, sunA:0.12, stars:true },
+  { h: 6,   top:[55,78,128], midTop:[180,125,145], mid:[245,170,118], bot:[70,84,112], sun:[255,214,140], sunX:0.30, sunY:0.72, sunA:0.55, stars:false },
+  { h: 8.5, top:[65,140,190], midTop:[145,190,218], mid:[190,220,215], bot:[125,165,170], sun:[255,250,210], sunX:0.42, sunY:0.30, sunA:0.38, stars:false },
+  { h: 12,  top:[77,143,196], midTop:[114,179,214], mid:[183,218,222], bot:[183,214,204], sun:[255,254,230], sunX:0.68, sunY:0.20, sunA:0.42, stars:false },
+  { h: 16,  top:[67,125,185], midTop:[110,168,205], mid:[190,214,175], bot:[145,178,165], sun:[255,242,150], sunX:0.78, sunY:0.30, sunA:0.30, stars:false },
+  { h: 18,  top:[44,40,96],  midTop:[146,84,150], mid:[252,148,110], bot:[168,70,86], sun:[255,160,90], sunX:0.62, sunY:0.62, sunA:0.55, stars:false },
+  { h: 20,  top:[16,20,42],  midTop:[50,40,84],  mid:[110,70,120],  bot:[20,16,40],  sun:[255,150,110], sunX:0.55, sunY:0.70, sunA:0.22, stars:true },
+  { h: 24,  top:[6,9,22],  midTop:[16,19,42], mid:[26,22,58], bot:[6,8,20], sun:[235,240,255], sunX:0.70, sunY:0.16, sunA:0.10, stars:true },
+];
+
+function _clamp01(v) { return Math.max(0, Math.min(1, v)); }
+function _hexRgb(c) { return [c>>16 & 255, c>>8 & 255, c & 255]; }
+
+function _lerpColors(a, b, t) {
+  return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+}
+function _rgbCss(c) { return `rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`; }
+
+// Resolve a continuous palette (with per-channel interpolation) for any hour in local time.
+function skyPaletteAt(hour) {
+  let h = ((hour % 24) + 24) % 24;
+  const p = SKY_PALETTES;
+  let i = 0;
+  while (i < p.length - 1 && h > p[i + 1].h) i++;
+  const a = p[i];
+  const b = p[(i + 1) % p.length];
+  let spanA = a.h, spanB = b.h;
+  if (spanB <= spanA) spanB += 24;
+  let local = h;
+  if (local < spanA) local += 24;
+  const t = (local - spanA) / (spanB - spanA);
+  const out = {
+    top: _lerpColors(a.top, b.top, t),
+    midTop: _lerpColors(a.midTop, b.midTop, t),
+    mid: _lerpColors(a.mid, b.mid, t),
+    bot: _lerpColors(a.bot, b.bot, t),
+    sun: _lerpColors(a.sun, b.sun, t),
+    sunX: a.sunX + (b.sunX - a.sunX) * t,
+    sunY: a.sunY + (b.sunY - a.sunY) * t,
+    sunA: a.sunA + (b.sunA - a.sunA) * t,
+    stars: t < 0.5 ? a.stars : b.stars,
+  };
+  return out;
+}
+
+// Solar disk glow layer (follows the sun position across the sky).
+function _skyGlowStop(p) {
+  return `
+    radial-gradient(circle at ${Math.round(p.sunX*100)}% ${Math.round(p.sunY*100)}%,
+      rgba(255,252,235,${0.9*p.sunA}) 0%,
+      rgba(255,230,150,${0.6*p.sunA}) 8%,
+      rgba(255,200,110,${0.3*p.sunA}) 18%,
+      rgba(255,170,90,${0.12*p.sunA}) 30%,
+      transparent 55%)`;
+}
+
+// Produce the CSS background string for bg-layer at a given local hour and optional eclipse dim (0..1).
+function smoothSkyBackground(hour, eclipseDim = 0) {
+  const p = skyPaletteAt(hour);
+  const glow = _skyGlowStop(p);
+  const g = glow + `, ` +
+    `linear-gradient(180deg,
+      ${_rgbCss(p.top)} 0%,
+      ${_rgbCss(p.midTop)} 38%,
+      ${_rgbCss(p.mid)} 68%,
+      ${_rgbCss(p.bot)} 100%)`;
+  if (eclipseDim > 0) {
+    return `linear-gradient(180deg, rgba(8,10,18,${eclipseDim}) 0%, rgba(6,8,16,${eclipseDim}) 100%), ` + g;
+  }
+  return g;
+}
+
+// ─── Solar eclipse (NASA official data + live detection) ───────
+// Source: NASA / F. Espenak, GSFC — Solar Eclipses 2021–2030
+// (eclipse.gsfc.nasa.gov/SEdecade/SEdecade2021.html). Times are UT
+// of "greatest eclipse"; the ephemeris below dims the sky live.
+const NASA_SOLAR_ECLIPSES = [
+  { id:'2026A', date:'2026-02-17T12:13:05Z', type:'Annular', mag:0.963, dur:'2m20s' },
+  { id:'2026T', date:'2026-08-12T17:47:05Z', type:'Total',   mag:1.039, dur:'2m18s' },
+  { id:'2027A', date:'2027-02-06T16:00:47Z', type:'Annular', mag:0.928, dur:'7m51s' },
+  { id:'2027T', date:'2027-08-02T10:07:49Z', type:'Total',   mag:1.079, dur:'6m23s' },
+  { id:'2028A', date:'2028-01-26T15:08:58Z', type:'Annular', mag:0.921, dur:'10m27s' },
+  { id:'2028T', date:'2028-07-22T02:56:39Z', type:'Total',   mag:1.056, dur:'5m10s' },
+  { id:'2029P1',date:'2029-06-12T04:06:13Z', type:'Partial', mag:0.458, dur:'—' },
+  { id:'2030A', date:'2030-06-01T06:29:13Z', type:'Annular', mag:0.944, dur:'5m21s' },
+  { id:'2030T', date:'2030-11-25T06:51:37Z', type:'Total',   mag:1.047, dur:'3m44s' },
+];
+
+function getSunEcliptic(date) {
+  const J2000 = Date.UTC(2000,0,1,12,0,0);
+  const d = (date.getTime()-J2000)/86400000;
+  const T = d/36525;
+  const g = (357.52911 + 35999.05029*T) % 360;
+  const gRad = g*Math.PI/180;
+  const L = 280.46646 + 36000.76983*T + 0.0003032*T*T;
+  const lam = (L + (1.9146 - 0.004817*T - 0.000014*T*T)*Math.sin(gRad)
+    + (0.019993 - 0.000101*T)*Math.sin(2*gRad) + 0.0002*Math.sin(3*gRad)) % 360;
+  const lamRad = lam*Math.PI/180;
+  const eps = (23.439291 - 0.01300417*T)*Math.PI/180;
+  const x = Math.cos(lamRad), y = Math.sin(lamRad)*Math.cos(eps), z = Math.sin(lamRad)*Math.sin(eps);
+  return { ra: Math.atan2(y,x), dec: Math.atan2(z, Math.sqrt(x*x+y*y)) };
+}
+
+function getMoonEcliptic(date) {
+  const J2000 = Date.UTC(2000,0,1,12,0,0);
+  const d = (date.getTime()-J2000)/86400000;
+  const T = d/36525;
+  const L0 = ((218.3165 + 481267.8813*T) % 360 + 360) % 360;
+  const M  = ((357.5291 + 35999.0503*T) % 360 + 360) % 360;
+  const Mr = M*Math.PI/180;
+  const F  = ((93.2720 + 483202.0175*T) % 360 + 360) % 360;
+  const Fr = F*Math.PI/180;
+  const D  = ((297.8502 + 445267.1115*T) % 360 + 360) % 360;
+  const Dr = D*Math.PI/180;
+  const lam = (L0 + 6.289*Math.sin(Mr) + 1.274*Math.sin(2*Dr-Mr)
+    + 0.658*Math.sin(2*Dr) + 0.214*Math.sin(2*Mr)
+    - 0.186*Math.sin(Mr) - 0.114*Math.sin(2*Fr)) % 360;
+  const beta = 5.128*Math.sin(Fr);
+  const lamRad = lam*Math.PI/180, betRad = beta*Math.PI/180;
+  const eps = (23.439 - 0.0000004*d)*Math.PI/180;
+  const x = Math.cos(betRad)*Math.cos(lamRad);
+  const y = Math.cos(betRad)*Math.sin(lamRad);
+  const z = Math.sin(betRad);
+  const xEq = x;
+  const yEq = y*Math.cos(eps) - z*Math.sin(eps);
+  const zEq = y*Math.sin(eps) + z*Math.cos(eps);
+  return { ra: Math.atan2(yEq,xEq), dec: Math.atan2(zEq, Math.sqrt(xEq*xEq+yEq*yEq)) };
+}
+
+// Live eclipse amount (0..1) from NASA's official greatest-eclipse timestamps.
+// The local ephemeris helpers above are useful for astronomy visuals, but are
+// not accurate enough to decide the exact second of a real eclipse. The
+// catalogue is the source of truth for this UI indicator.
+function computeEclipseDim(date = new Date()) {
+  const time = date.getTime();
+  let nearest = null;
+  for (const eclipse of NASA_SOLAR_ECLIPSES) {
+    const ts = Date.parse(eclipse.date);
+    const distance = Math.abs(time - ts);
+    if (!nearest || distance < nearest.distance) nearest = { eclipse, distance };
+  }
+  // Greatest-eclipse is an instant. Use a short tolerance for clock/network
+  // jitter so a tab repaint does not miss it, without darkening normal days.
+  const tolerance = 15 * 60 * 1000;
+  if (!nearest || nearest.distance > tolerance) return 0;
+  return _clamp01(1 - nearest.distance / tolerance);
+}
+
+function getNextSolarEclipse(fromMs = Date.now()) {
+  return NASA_SOLAR_ECLIPSES
+    .map(e => ({ ...e, ts: Date.parse(e.date) }))
+    .filter(e => e.ts >= fromMs)
+    .sort((a,b) => a.ts-b.ts)[0] || null;
+}
+
+// Global flag: when the bottom-left panel simulates an eclipse for preview.
+let eclipsePreview = 0; // 0 = off, >0 dim
+let skyTransitionTimer = null;
+function crossfadeSky(background, initial = false) {
+  const current = document.getElementById('bg-layer');
+  const next = document.getElementById('bg-layer-next');
+  if (!current || !next) return;
+  if (initial) {
+    current.style.background = background;
+    next.style.opacity = '0';
+    next.style.background = '';
+    return;
+  }
+  next.style.transition = 'none';
+  next.style.background = background;
+  next.style.opacity = '0';
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      next.style.transition = 'opacity 1.2s ease';
+      next.style.opacity = '1';
+    });
+  });
+  clearTimeout(skyTransitionTimer);
+  skyTransitionTimer = setTimeout(() => {
+    current.style.background = background;
+    next.style.transition = 'none';
+    next.style.opacity = '0';
+    next.style.background = '';
+  }, 1250);
+}
+function getEclipseDimForDisplay() {
+  if (eclipsePreview > 0) return eclipsePreview;
+  return computeEclipseDim(new Date());
+}
+
 function normalizeTheme(value) {
   if (value === 'auto') return 'default';
   if (['default', 'liquid', 'galaxy'].includes(value)) return value;
@@ -371,21 +621,81 @@ function normalizeTheme(value) {
 function getResolvedTheme() {
   return normalizeTheme(state.settings.theme);
 }
-function isGalaxyTheme() {
-  return getResolvedTheme() === 'galaxy';
+
+// Small, documented console API for power users and debugging. It only
+// calls the same state/update paths as the UI, so commands stay reversible.
+function installConsoleCommands() {
+  const api = {
+    getState() { return JSON.parse(JSON.stringify(state)); },
+    setTheme(theme) {
+      const value = normalizeTheme(theme);
+      state.settings.theme = value;
+      const radio = document.querySelector(`input[name="theme"][value="${value}"]`);
+      if (radio) radio.checked = true;
+      applySettings();
+      saveState();
+      return value;
+    },
+    setGalaxyBody(body) {
+      const allowed = ['milkyway', 'earth', 'mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'blackhole'];
+      if (!allowed.includes(body)) throw new Error(`Unknown Galaxy body: ${body}`);
+      state.settings.theme = 'galaxy';
+      state.settings.galaxyPlanet = body;
+      const select = document.getElementById('s-galaxy-planet');
+      if (select) select.value = body;
+      applySettings();
+      saveState();
+      return body;
+    },
+    setTime(hour) {
+      const value = Number(hour);
+      if (!Number.isFinite(value) || value < 0 || value > 24) throw new Error('Time must be between 0 and 24');
+      state.settings.autoDayNight = false;
+      state.settings.bgTime = value;
+      const slider = document.getElementById('s-bg-time');
+      const auto = document.getElementById('s-auto-daynight');
+      if (slider) slider.value = value;
+      if (auto) auto.checked = false;
+      updateBgTimeLabel();
+      applySettings();
+      saveState();
+      return value;
+    },
+    setAutoTime(enabled = true) {
+      state.settings.autoDayNight = Boolean(enabled);
+      const auto = document.getElementById('s-auto-daynight');
+      if (auto) auto.checked = state.settings.autoDayNight;
+      applySettings();
+      saveState();
+      return state.settings.autoDayNight;
+    },
+    previewEclipse() { eclipsePreview = 0.85; applySettings(); return true; },
+    clearEclipse() { eclipsePreview = 0; applySettings(); return true; },
+    clearWallpaper() { selectWallpaper(null); saveState(); applySettings(); return true; }
+  };
+  window.SpaceDial = api;
+  window.spacedial = api;
+}
+function isMilkywaySelected() {
+  return getResolvedTheme() === 'galaxy' && (state.settings.galaxyPlanet || 'earth') === 'milkyway';
+}
+function isEarthSelected() {
+  return getResolvedTheme() === 'galaxy' && (state.settings.galaxyPlanet || 'earth') === 'earth';
 }
 function isFixedWallpaperTheme() {
   const t = getResolvedTheme();
-  return t === 'liquid';
+  return t === 'liquid' || isEarthSelected() || isMilkywaySelected();
 }
 
 // ─── Apply settings to DOM ──────────────────────────────────
 function applySettings(initial) {
   const s = state.settings;
+  s.galaxyPlanet = normalizeGalaxyBody(s.galaxyPlanet);
   const root = document.documentElement;
 
   // Background
   const bgLayer = document.getElementById('bg-layer');
+  const nextBgLayer = document.getElementById('bg-layer-next');
   const weatherLayer = document.getElementById('weather-layer');
   const starsCanvas = document.getElementById('stars-canvas');
   const galaxyCanvas = document.getElementById('galaxy-canvas');
@@ -402,30 +712,50 @@ function applySettings(initial) {
 
   const theme = getResolvedTheme();
   const galaxy = theme === 'galaxy';
-  const fixedBg = theme === 'liquid';
+  const galaxyPlanet = s.galaxyPlanet || 'earth';
+  const milkyway = galaxy && galaxyPlanet === 'milkyway';
+  const earth = galaxy && galaxyPlanet === 'earth';
+  const simPlanet = galaxy && !milkyway && !earth;
+  const fixedBg = theme === 'liquid' || galaxy;
   const bgType = galaxy ? 'galaxy' : (fixedBg ? theme : getResolvedBgType());
-  const weatherEffect = (galaxy || fixedBg) ? 'clear' : getResolvedWeatherEffect();
+  const weatherEffect = galaxy || theme === 'liquid' ? 'clear' : getResolvedWeatherEffect();
   root.dataset.bg = bgType;
   root.dataset.weather = weatherEffect;
   root.dataset.theme = theme;
   root.dataset.liquidVariant = theme === 'liquid' ? (s.liquidVariant || 'light') : '';
   if (galaxy) {
-    bgLayer.className = 'bg-galaxy';
+    bgLayer.className = milkyway ? 'bg-milkyway' : (earth ? 'bg-earth' : 'bg-planet');
     weatherLayer.className = '';
     bgLayer.style.background = '';
     bgLayer.style.backgroundImage = '';
-  } else if (fixedBg) {
-    bgLayer.className = `bg-${theme}`;
+    if (nextBgLayer) { nextBgLayer.style.opacity = '0'; nextBgLayer.style.background = ''; }
+  } else if (theme === 'liquid') {
+    bgLayer.className = 'bg-liquid';
     weatherLayer.className = '';
     bgLayer.style.background = '';
     bgLayer.style.backgroundImage = '';
+    if (nextBgLayer) { nextBgLayer.style.opacity = '0'; nextBgLayer.style.background = ''; }
   } else {
     bgLayer.className = `bg-${bgType}`;
     weatherLayer.className = weatherEffect === 'clear' ? '' : `weather-${weatherEffect}`;
-    bgLayer.style.background = '';
-    bgLayer.style.backgroundImage = '';
   }
-  if (galaxyCanvas) galaxyCanvas.style.display = galaxy ? 'block' : 'none';
+  if (galaxyCanvas) galaxyCanvas.style.display = milkyway ? 'block' : 'none';
+  const planetCanvas = document.getElementById('planet-canvas');
+  if (planetCanvas) planetCanvas.style.display = simPlanet ? 'block' : 'none';
+  const earthCanvas = document.getElementById('earth-canvas');
+  if (earthCanvas) earthCanvas.style.display = earth ? 'block' : 'none';
+  if (!earth && typeof EarthTheme !== 'undefined' && EarthTheme.isActive()) {
+    EarthTheme.destroy();
+  }
+  if (!simPlanet && typeof GalaxyTheme !== 'undefined' && GalaxyTheme.isActive()) {
+    GalaxyTheme.destroy();
+  }
+  const earthTimePanel = document.getElementById('earth-time-panel');
+  if (earthTimePanel) earthTimePanel.style.display = earth ? 'flex' : 'none';
+  const skyTimePanel = document.getElementById('sky-time-panel');
+  if (skyTimePanel) skyTimePanel.style.display = theme === 'default' && !galaxy && !isFixedWallpaperTheme() ? 'flex' : 'none';
+  const bgOverlay = document.getElementById('bg-overlay');
+  if (bgOverlay) bgOverlay.style.display = earth ? 'none' : '';
   starsCanvas.style.display = galaxy ? 'none' : (backgroundUsesStars(bgType) ? 'block' : 'none');
   weatherLayer.style.display = weatherEffect === 'clear' ? 'none' : 'block';
 
@@ -471,10 +801,161 @@ function applySettings(initial) {
   const notesArea = document.getElementById('notes-area');
   if (notesArea && initial) notesArea.value = state.notes || '';
 
-  if (galaxy) drawGalaxyStars();
+  if (milkyway) drawGalaxyStars();
   else if (theme === 'default' && backgroundUsesStars(bgType)) drawStars();
+
+  // Apply custom wallpaper if set (Default theme).
+  if (theme === 'default') {
+    if (s.wallpaper) {
+      applyWallpaperPreview(s.wallpaper);
+    } else {
+      const eclipseDim = getEclipseDimForDisplay();
+      crossfadeSky(smoothSkyBackground(getResolvedSkyHour(), eclipseDim), Boolean(initial));
+      bgLayer.style.backgroundSize = '';
+      bgLayer.style.backgroundPosition = '';
+      bgLayer.style.backgroundRepeat = '';
+      bgLayer.style.filter = '';
+    }
+  }
+
+  if (earth) {
+    const panel = document.getElementById('earth-time-panel');
+    if (panel) panel.style.display = 'flex';
+    const ec = document.getElementById('earth-canvas');
+    if (ec && typeof EarthTheme !== 'undefined' && typeof THREE !== 'undefined') {
+      ec.style.display = 'block';
+      if (!EarthTheme.isActive()) {
+        requestAnimationFrame(() => {
+          try {
+            EarthTheme.init(ec, s.weatherCity);
+            if (typeof EarthTheme.setWeatherEffect === 'function') {
+              const devOverride = sessionStorage.getItem('dev-earth-override');
+              EarthTheme.setWeatherEffect(devOverride || getResolvedWeatherEffect());
+            }
+          }
+          catch(e) { console.error('EarthTheme init failed:', e); }
+        });
+      } else if (typeof EarthTheme.setWeatherEffect === 'function') {
+        const devOverride = sessionStorage.getItem('dev-earth-override');
+        EarthTheme.setWeatherEffect(devOverride || getResolvedWeatherEffect());
+      }
+    }
+  }
+  if (galaxy && simPlanet) {
+    const pc = document.getElementById('planet-canvas');
+    if (pc && typeof GalaxyTheme !== 'undefined' && typeof THREE !== 'undefined') {
+      pc.style.display = 'block';
+      const planet = s.galaxyPlanet || 'earth';
+      if (!GalaxyTheme.isActive()) {
+        requestAnimationFrame(() => {
+          try { GalaxyTheme.init(pc, planet); }
+          catch(e) { console.error('GalaxyTheme init failed:', e); }
+        });
+      } else if (GalaxyTheme.getPlanet() !== planet) {
+        GalaxyTheme.setPlanet(planet);
+      }
+    }
+  }
   drawWeatherEffect(weatherEffect);
   updateSpeedTestTheme();
+}
+
+// ─── Earth sim-time control ─────────────────────────────────
+function initEarthTimeControl() {
+  const panel = document.getElementById('earth-time-panel');
+  if (!panel) return;
+  const toggle = document.getElementById('earth-time-toggle');
+  const box = document.getElementById('earth-time-box');
+  const input = document.getElementById('earth-time-input');
+  const nowBtn = document.getElementById('earth-time-now');
+
+  toggle.addEventListener('click', () => {
+    panel.classList.toggle('open');
+  });
+  nowBtn.addEventListener('click', () => {
+    if (typeof EarthTheme !== 'undefined' && EarthTheme.setSimTime) EarthTheme.clearSimTime();
+    input.value = '';
+  });
+  input.addEventListener('change', () => {
+    if (!input.value) return;
+    const ms = new Date(input.value).getTime();
+    if (!isNaN(ms) && typeof EarthTheme !== 'undefined' && EarthTheme.setSimTime) {
+      EarthTheme.setSimTime(ms);
+    }
+  });
+  panel.querySelectorAll('.earth-time-presets button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ms = new Date(btn.dataset.ts + 'Z').getTime();
+      input.value = btn.dataset.ts;
+      if (typeof EarthTheme !== 'undefined' && EarthTheme.setSimTime) EarthTheme.setSimTime(ms);
+    });
+  });
+}
+
+// ─── Default-theme time & eclipse quick control ──────────────
+function initSkyTimeControl() {
+  const panel = document.getElementById('sky-time-panel');
+  if (!panel) return;
+  const toggle = document.getElementById('sky-time-toggle');
+  const previewBtn = document.getElementById('sky-eclipse-now');
+  const clearBtn = document.getElementById('sky-eclipse-clear');
+  const status = document.getElementById('sky-eclipse-status');
+
+  const refreshStatus = () => {
+    if (!status) return;
+    const next = getNextSolarEclipse();
+    const live = computeEclipseDim(new Date());
+    if (live > 0.15) status.textContent = `● Eclipse in progress (${Math.round(live*100)}%)`;
+    else if (next) {
+      const d = new Date(next.ts);
+      status.textContent = `Next ${next.type.toLowerCase()} eclipse: ${d.toUTCString().replace(' GMT','')} (mag ${next.mag.toFixed(3)})`;
+    } else status.textContent = 'Next: none in catalogue';
+  };
+  refreshStatus();
+
+  toggle.addEventListener('click', () => panel.classList.toggle('open'));
+
+  panel.querySelectorAll('[data-sky]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const v = btn.dataset.sky;
+      if (v === 'now') {
+        state.settings.autoDayNight = true;
+        const probe = document.getElementById('s-auto-daynight');
+        if (probe) probe.checked = true;
+      } else {
+        state.settings.autoDayNight = false;
+        state.settings.bgTime = _clamp01(parseFloat(v) / 24) * 24;
+        const probe = document.getElementById('s-auto-daynight');
+        if (probe) probe.checked = false;
+        const bg = document.getElementById('s-bg-time');
+        if (bg) { bg.value = state.settings.bgTime; updateBgTimeLabel(); }
+      }
+      applySettings();
+      saveState();
+    });
+  });
+
+  if (previewBtn) previewBtn.addEventListener('click', () => {
+    const next = getNextSolarEclipse();
+    if (next) {
+      // Simulate the eclipse by dimming to its peak while keeping an artificially
+      // "solar noon" sky so the effect is visible regardless of current local time.
+      state.settings.autoDayNight = false;
+      state.settings.bgTime = 12;
+      const auto = document.getElementById('s-auto-daynight');
+      if (auto) auto.checked = false;
+      const save = document.getElementById('s-bg-time');
+      if (save) { save.value = 12; updateBgTimeLabel(); }
+      eclipsePreview = Math.max(0.55, Math.min(0.95, next.mag));
+    } else {
+      eclipsePreview = 0.8;
+    }
+    applySettings();
+  });
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    eclipsePreview = 0;
+    applySettings();
+  });
 }
 
 // ─── Stars ──────────────────────────────────────────────────
@@ -661,7 +1142,7 @@ function drawGalaxyStars() {
   if (galaxyAnimationFrame) { cancelAnimationFrame(galaxyAnimationFrame); galaxyAnimationFrame = null; }
   c.width = window.innerWidth;
   c.height = window.innerHeight;
-  if (!isGalaxyTheme()) { c.style.display = 'none'; return; }
+  if (!isMilkywaySelected()) { c.style.display = 'none'; return; }
 
   const ctx = c.getContext('2d');
   const count = Math.min(150, Math.max(60, Math.round((c.width * c.height) / 15000)));
@@ -681,7 +1162,7 @@ function drawGalaxyStars() {
   stars.forEach(s => { s.baseX = s.x; s.baseY = s.y; });
 
   function render(now) {
-    if (!isGalaxyTheme()) {
+    if (!isMilkywaySelected()) {
       ctx.clearRect(0, 0, c.width, c.height);
       galaxyAnimationFrame = null;
       return;
@@ -732,6 +1213,14 @@ function drawWeatherEffect(effect = getResolvedWeatherEffect()) {
   if (weatherAnimationFrame) {
     cancelAnimationFrame(weatherAnimationFrame);
     weatherAnimationFrame = null;
+  }
+if (typeof getResolvedTheme === 'function' && getResolvedTheme() === 'galaxy') {
+    c.width = window.innerWidth;
+    c.height = window.innerHeight;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+    c.style.display = 'none';
+    return;
   }
   c.width = window.innerWidth;
   c.height = window.innerHeight;
@@ -942,6 +1431,24 @@ const MONTHS = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST
 
 function startClock() { updateClock(); setInterval(updateClock, 1000); }
 
+// Refresh the Default smooth sky once a minute so Auto mode stays in sync.
+let _lastSkyMinute = -1;
+function refreshSkyMinute(now) {
+  const theme = getResolvedTheme();
+  if (theme !== 'default' || state.settings.wallpaper) { _lastSkyMinute = -1; return; }
+  const key = now.getMinutes();
+  if (key === _lastSkyMinute) return;
+  _lastSkyMinute = key;
+  applySettings(false);
+  const panel = document.getElementById('sky-eclipse-status');
+  if (panel) {
+    const next = getNextSolarEclipse();
+    panel.textContent = next
+      ? `Next ${next.type.toLowerCase()} eclipse: ${new Date(next.ts).toUTCString().replace(' GMT','')}`
+      : 'Next: none in catalogue';
+  }
+}
+
 function formatClockText(now) {
   const s = state.settings;
   let hh = now.getHours(), mm = now.getMinutes(), ss = now.getSeconds();
@@ -1024,6 +1531,7 @@ function updateClock() {
     String(now.getDate()).padStart(2,'0') + '  ' + MONTHS[now.getMonth()] + ',  ' + now.getFullYear() + '.';
   const nextClockText = formatClockText(now);
   if (lastClockText !== nextClockText) renderClockText(nextClockText);
+  refreshSkyMinute(now);
 }
 
 // ─── Weather ────────────────────────────────────────────────
@@ -2239,10 +2747,16 @@ function openSettings(triggerEl) {
   s.weatherEffect = normalizeWeatherEffect(s.weatherEffect);
   const themeRadio = document.querySelector(`input[name="theme"][value="${getResolvedTheme()}"]`);
   if (themeRadio) themeRadio.checked = true;
-  const bgRadio = document.querySelector(`input[name="bg-type"][value="${s.bgType}"]`);
-  if (bgRadio) bgRadio.checked = true;
+  const bgTimeInput = document.getElementById('s-bg-time');
+  if (bgTimeInput) {
+    bgTimeInput.value = getResolvedSkyHour();
+    updateBgTimeLabel();
+  }
   document.getElementById('s-auto-options').style.display = getResolvedTheme() === 'default' ? 'block' : 'none';
   document.getElementById('s-liquid-variant-wrap').style.display = getResolvedTheme() === 'liquid' ? 'block' : 'none';
+  document.getElementById('s-galaxy-options').style.display = getResolvedTheme() === 'galaxy' ? 'block' : 'none';
+  const gpSel = document.getElementById('s-galaxy-planet');
+  if (gpSel) gpSel.value = s.galaxyPlanet || 'earth';
   const lvRadio = document.querySelector(`input[name="liquid-variant"][value="${s.liquidVariant || 'light'}"]`);
   if (lvRadio) lvRadio.checked = true;
   document.getElementById('s-auto-daynight').checked = !!s.autoDayNight;
@@ -2283,6 +2797,21 @@ function openSettings(triggerEl) {
   document.getElementById('s-shuffle-start').checked = s.shuffleOnStart;
   document.getElementById('s-blocked-domains').value = s.blockedDomains || '';
   chrome.storage.local.get('ai-funny-thinking', r => { document.getElementById('s-ai-funny').checked = !!r['ai-funny-thinking']; });
+
+  // Wallpaper settings
+  document.getElementById('s-wallpaper-zoom').value = s.wallpaperZoom || 100;
+  document.getElementById('wallpaper-zoom-val').textContent = (s.wallpaperZoom || 100) + '%';
+  document.getElementById('s-wallpaper-x').value = s.wallpaperX || 50;
+  document.getElementById('wallpaper-x-val').textContent = (s.wallpaperX || 50) + '%';
+  document.getElementById('s-wallpaper-y').value = s.wallpaperY || 50;
+  document.getElementById('wallpaper-y-val').textContent = (s.wallpaperY || 50) + '%';
+  document.getElementById('s-wallpaper-blur').checked = !!s.wallpaperBlur;
+  const fitRadio = document.querySelector(`input[name="wallpaper-fit"][value="${s.wallpaperFit || 'cover'}"]`);
+  if (fitRadio) fitRadio.checked = true;
+
+  // Scan wallpapers from Wallpapers folder
+  loadWallpaperGrid(s.wallpaper);
+
   switchSettingsSection('appearance');
   getLiveVersion().then(v => { document.querySelector('.settings-version').textContent = 'v' + v; });
   loadAiApiKey().then(key => {
@@ -2294,13 +2823,19 @@ function openSettings(triggerEl) {
 function closeSettings() { closeOverlay('modal-settings'); }
 
 // ─── Developer menu ─────────────────────────────────────────
-const DEV_FILES = ['manifest.json', 'newtab.html', 'newtab.css', 'newtab.js', 'ai.html', 'ai.js', 'ai.css', 'blocked.html', 'blocked.js', 'milkyway.jpg', 'liquid-dark.jpg', 'liquid-light.jpg', 'Anurati-Regular.woff'];
+const DEV_FILES = ['manifest.json', 'newtab.html', 'newtab.css', 'newtab.js', 'console-capture.js', 'ai.html', 'ai.js', 'ai.css', 'blocked.html', 'blocked.js', 'Themes/earth/three.min.js', 'Themes/earth/earth-theme.js', 'Themes/earth/earth-weather.js', 'Themes/earth/earth-day.jpg', 'Themes/earth/earth-night.jpg', 'Themes/earth/earth-bump.png', 'Themes/earth/earth-spec.png', 'Themes/earth/moon.jpg', 'Themes/earth/sun.jpg', 'Themes/galaxy/galaxy-theme.js', 'Themes/galaxy/mercury.jpg', 'Themes/galaxy/venus.jpg', 'Themes/galaxy/earth.jpg', 'Themes/galaxy/mars.jpg', 'Themes/galaxy/jupiter.jpg', 'Themes/galaxy/saturn.jpg', 'Themes/galaxy/saturn-ring.png', 'Themes/galaxy/uranus.jpg', 'Themes/galaxy/uranus-ring.png', 'Themes/galaxy/neptune.jpg', 'Themes/milkyway/milkyway.jpg', 'Themes/macos/liquid-light.jpg', 'Themes/macos/liquid-dark.jpg', 'Anurati-Regular.woff'];
 function openDevMenu() {
   document.getElementById('dev-logs').value = devLogs.length
     ? devLogs.map(l => `[${l.time}] ${l.type.toUpperCase()} ${l.msg}`).join('\n')
     : '(no logs captured yet)';
   getLiveVersion().then(v => { document.getElementById('dev-version').textContent = 'v' + v; });
   document.getElementById('dev-integrity').textContent = '';
+  const devOverride = sessionStorage.getItem('dev-earth-override');
+  document.querySelectorAll('.dev-weather-btn').forEach(b => {
+    b.classList.toggle('active', devOverride ? b.dataset.effect === devOverride : b.dataset.effect === 'clear');
+  });
+  const statusEl = document.getElementById('dev-weather-status');
+  if (statusEl) statusEl.textContent = devOverride ? `Override: ${devOverride}` : 'Auto mode (resets on reload)';
   openOverlay('modal-dev');
 }
 function closeDevMenu() { closeOverlay('modal-dev'); }
@@ -2409,7 +2944,11 @@ async function saveSettings() {
   const s = state.settings;
   s.theme = document.querySelector('input[name="theme"]:checked').value || 'default';
   s.liquidVariant = document.querySelector('input[name="liquid-variant"]:checked')?.value || 'light';
-  s.bgType = normalizeBgType(document.querySelector('input[name="bg-type"]:checked').value);
+  const gpSel = document.getElementById('s-galaxy-planet');
+  s.galaxyPlanet = gpSel ? (gpSel.value || 'earth') : (s.galaxyPlanet || 'earth');
+  s.bgType = normalizeBgType(document.querySelector('input[name="bg-type"]:checked')?.value || bgTypeFromHour(getResolvedSkyHour()));
+  const bgTimeInput = document.getElementById('s-bg-time');
+  if (bgTimeInput) s.bgTime = _clamp01(parseFloat(bgTimeInput.value) / 24) * 24;
   s.autoDayNight = document.getElementById('s-auto-daynight').checked;
   s.weatherEffect = normalizeWeatherEffect(document.getElementById('s-weather-effect').value);
   s.autoWeather = document.getElementById('s-auto-weather').checked;
@@ -2443,7 +2982,7 @@ async function saveSettings() {
   if (aiKeyEl.dataset.hasKey === '1' && !aiKeyEl.value) {
     await saveAiApiKey('');
     aiKeyEl.dataset.hasKey = '0';
-  } else if (aiKeyEl.dataset.hasKey !== '1' && aiKeyEl.value && !aiKeyEl.value.startsWith('••')) {
+  } else if (aiKeyEl.value && !aiKeyEl.value.startsWith('••')) {
     await saveAiApiKey(aiKeyEl.value);
     aiKeyEl.dataset.hasKey = '1';
   }
@@ -2455,6 +2994,13 @@ async function saveSettings() {
   s.loopPlaylist = document.getElementById('s-loop').checked;
   s.shuffleOnStart = document.getElementById('s-shuffle-start').checked;
   s.blockedDomains = document.getElementById('s-blocked-domains').value;
+
+  // Wallpaper settings
+  s.wallpaperFit = document.querySelector('input[name="wallpaper-fit"]:checked')?.value || 'cover';
+  s.wallpaperZoom = parseInt(document.getElementById('s-wallpaper-zoom').value) || 100;
+  s.wallpaperX = parseInt(document.getElementById('s-wallpaper-x').value) || 50;
+  s.wallpaperY = parseInt(document.getElementById('s-wallpaper-y').value) || 50;
+  s.wallpaperBlur = document.getElementById('s-wallpaper-blur').checked;
 
   saveState();
   applySettings();
@@ -3592,6 +4138,162 @@ function setOverlayOrigin(panel, triggerEl) {
   panel.style.setProperty('--lamp-skew-x', `${shiftX >= 0 ? 12 : -12}deg`);
 }
 
+// ─── Wallpaper grid ────────────────────────────────────────
+let availableWallpapers = [];
+
+async function loadWallpaperGrid(selectedWallpaper) {
+  const grid = document.getElementById('s-wallpaper-grid');
+  if (!grid) return;
+
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'scan-wallpapers' });
+    availableWallpapers = response?.wallpapers || [];
+  } catch (e) {
+    availableWallpapers = [];
+  }
+
+  grid.innerHTML = '';
+
+  // Add "None" option
+  const noneCard = document.createElement('div');
+  noneCard.className = 'wallpaper-card' + (!selectedWallpaper ? ' selected' : '');
+  noneCard.innerHTML = `
+    <div class="wallpaper-preview" style="background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);display:flex;align-items:center;justify-content:center">
+      <span style="font-size:11px;color:rgba(255,255,255,0.5)">None</span>
+    </div>
+    <div class="wallpaper-name">Default</div>
+  `;
+  noneCard.addEventListener('click', () => selectWallpaper(null));
+  grid.appendChild(noneCard);
+
+  // Add wallpaper cards
+  for (const wp of availableWallpapers) {
+    const card = document.createElement('div');
+    card.className = 'wallpaper-card' + (selectedWallpaper === wp.file ? ' selected' : '');
+    card.innerHTML = `
+      <div class="wallpaper-preview">
+        ${wp.type === 'video'
+          ? `<video src="${chrome.runtime.getURL(wp.file)}" muted loop autoplay playsinline></video>`
+          : `<img src="${chrome.runtime.getURL(wp.file)}" alt="${wp.name}">`
+        }
+      </div>
+      <div class="wallpaper-name">${wp.name}</div>
+    `;
+    card.addEventListener('click', () => selectWallpaper(wp.file));
+    grid.appendChild(card);
+  }
+
+  // Show/hide controls
+  const controls = document.getElementById('s-wallpaper-controls');
+  if (controls) {
+    controls.style.display = selectedWallpaper ? 'block' : 'none';
+  }
+}
+
+function selectWallpaper(file) {
+  state.settings.wallpaper = file;
+  document.querySelectorAll('.wallpaper-card').forEach(c => c.classList.remove('selected'));
+  const cards = document.querySelectorAll('.wallpaper-card');
+  if (!file) {
+    cards[0]?.classList.add('selected');
+  } else {
+    const idx = availableWallpapers.findIndex(w => w.file === file);
+    if (idx >= 0) cards[idx + 1]?.classList.add('selected');
+  }
+  const controls = document.getElementById('s-wallpaper-controls');
+  if (controls) {
+    controls.style.display = file ? 'block' : 'none';
+  }
+  applyWallpaperPreview(file);
+}
+
+function applyWallpaperPreview(file) {
+  const bgLayer = document.getElementById('bg-layer');
+  if (!bgLayer) return;
+
+  const s = state.settings;
+  const zoom = s.wallpaperZoom || 100;
+  const posX = s.wallpaperX || 50;
+  const posY = s.wallpaperY || 50;
+  const fit = s.wallpaperFit || 'cover';
+  const blur = s.wallpaperBlur || false;
+
+  if (!file) {
+    bgLayer.style.backgroundImage = '';
+    if (getResolvedTheme() === 'default') {
+      bgLayer.style.background = smoothSkyBackground(getResolvedSkyHour(), getEclipseDimForDisplay());
+      bgLayer.style.backgroundSize = '';
+      bgLayer.style.backgroundPosition = '';
+      bgLayer.style.backgroundRepeat = '';
+      bgLayer.style.filter = '';
+    }
+    return;
+  }
+
+  const url = chrome.runtime.getURL(file);
+  const size = fit === 'cover' ? 'cover' : fit === 'contain' ? 'contain' : fit === 'stretch' ? '100% 100%' : 'auto';
+  const pos = `${posX}% ${posY}%`;
+  const filter = blur ? 'blur(8px) brightness(0.8)' : '';
+
+  // Keep the generated sky underneath the wallpaper. If a stale or missing
+  // wallpaper path is stored, Default still has a visible sky instead of a
+  // black transparent layer.
+  const fallbackSky = getResolvedTheme() === 'default'
+    ? smoothSkyBackground(getResolvedSkyHour(), getEclipseDimForDisplay())
+    : '';
+  bgLayer.style.background = `url('${url}') center / ${size} no-repeat${fallbackSky ? `, ${fallbackSky}` : ''}`;
+  bgLayer.style.backgroundImage = `url('${url}'), ${fallbackSky || 'none'}`;
+  bgLayer.style.backgroundSize = size;
+  bgLayer.style.backgroundPosition = pos;
+  bgLayer.style.backgroundRepeat = 'no-repeat';
+  bgLayer.style.filter = filter;
+}
+
+function initWallpaperControls() {
+  const zoomSlider = document.getElementById('s-wallpaper-zoom');
+  const xSlider = document.getElementById('s-wallpaper-x');
+  const ySlider = document.getElementById('s-wallpaper-y');
+  const blurToggle = document.getElementById('s-wallpaper-blur');
+
+  if (zoomSlider) {
+    zoomSlider.addEventListener('input', (e) => {
+      state.settings.wallpaperZoom = parseInt(e.target.value);
+      document.getElementById('wallpaper-zoom-val').textContent = e.target.value + '%';
+      applyWallpaperPreview(state.settings.wallpaper);
+    });
+  }
+
+  if (xSlider) {
+    xSlider.addEventListener('input', (e) => {
+      state.settings.wallpaperX = parseInt(e.target.value);
+      document.getElementById('wallpaper-x-val').textContent = e.target.value + '%';
+      applyWallpaperPreview(state.settings.wallpaper);
+    });
+  }
+
+  if (ySlider) {
+    ySlider.addEventListener('input', (e) => {
+      state.settings.wallpaperY = parseInt(e.target.value);
+      document.getElementById('wallpaper-y-val').textContent = e.target.value + '%';
+      applyWallpaperPreview(state.settings.wallpaper);
+    });
+  }
+
+  if (blurToggle) {
+    blurToggle.addEventListener('change', (e) => {
+      state.settings.wallpaperBlur = e.target.checked;
+      applyWallpaperPreview(state.settings.wallpaper);
+    });
+  }
+
+  document.querySelectorAll('input[name="wallpaper-fit"]').forEach(r => {
+    r.addEventListener('change', () => {
+      state.settings.wallpaperFit = r.value;
+      applyWallpaperPreview(state.settings.wallpaper);
+    });
+  });
+}
+
 function openOverlay(id, triggerEl) {
   const panel = document.getElementById(id);
   if (!panel) return;
@@ -3677,6 +4379,29 @@ function bindAll() {
   document.getElementById('dev-integrity-btn').addEventListener('click', runIntegrityCheck);
   document.getElementById('dev-selftest-btn').addEventListener('click', runSelfTest);
   document.getElementById('modal-dev').addEventListener('mousedown', e => { if (e.target === e.currentTarget) closeDevMenu(); });
+
+  // Dev — Earth weather override (session-only, resets on reload)
+  document.querySelectorAll('.dev-weather-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const effect = btn.dataset.effect;
+      if (effect === 'clear') {
+        sessionStorage.removeItem('dev-earth-override');
+      } else {
+        sessionStorage.setItem('dev-earth-override', effect);
+      }
+      try {
+        if (typeof EarthWeather !== 'undefined' && typeof EarthWeather.setEffect === 'function') {
+          EarthWeather.setEffect(effect);
+        } else if (typeof EarthTheme !== 'undefined' && typeof EarthTheme.setWeatherEffect === 'function') {
+          EarthTheme.setWeatherEffect(effect);
+        }
+      } catch(e) { console.warn('Earth weather override failed:', e); }
+      document.querySelectorAll('.dev-weather-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const statusEl = document.getElementById('dev-weather-status');
+      if (statusEl) statusEl.textContent = effect === 'clear' ? 'Auto mode (resets on reload)' : `Override: ${effect}`;
+    });
+  });
   document.getElementById('modal-settings').addEventListener('mousedown', e => { if (e.target === e.currentTarget) closeSettings(); });
   document.querySelectorAll('.settings-nav-btn').forEach(btn => {
     btn.addEventListener('click', () => switchSettingsSection(btn.dataset.section));
@@ -3708,17 +4433,43 @@ function bindAll() {
     }
   });
 
-  document.querySelectorAll('input[name="bg-type"]').forEach(r => r.addEventListener('change', () => {
-    if (r.checked) document.getElementById('s-auto-daynight').checked = false;
+  const bgTimeInput = document.getElementById('s-bg-time');
+  if (bgTimeInput) bgTimeInput.addEventListener('input', () => {
+    document.getElementById('s-auto-daynight').checked = false;
+    updateBgTimeLabel();
+    state.settings.bgTime = _clamp01(parseFloat(bgTimeInput.value) / 24) * 24;
+    applySettings();
+  });
+  document.querySelectorAll('.sky-preset').forEach(btn => btn.addEventListener('click', () => {
+    document.getElementById('s-auto-daynight').checked = false;
+    state.settings.bgTime = _clamp01(parseFloat(btn.dataset.bgtime) / 24) * 24;
+    if (bgTimeInput) { bgTimeInput.value = state.settings.bgTime; updateBgTimeLabel(); }
+    applySettings();
   }));
   document.querySelectorAll('input[name="theme"]').forEach(r => r.addEventListener('change', () => {
     if (r.checked) {
       document.getElementById('s-auto-options').style.display = r.value === 'default' ? 'block' : 'none';
       document.getElementById('s-liquid-variant-wrap').style.display = r.value === 'liquid' ? 'block' : 'none';
+      document.getElementById('s-galaxy-options').style.display = r.value === 'galaxy' ? 'block' : 'none';
     }
   }));
+  const gpSel = document.getElementById('s-galaxy-planet');
+  if (gpSel) gpSel.addEventListener('change', () => {
+    state.settings.galaxyPlanet = gpSel.value || 'earth';
+    if (getResolvedTheme() === 'galaxy' && typeof GalaxyTheme !== 'undefined' && GalaxyTheme.isActive()) {
+GalaxyTheme.setPlanet(state.settings.galaxyPlanet);
+    }
+    saveState();
+    applySettings();
+  });
   document.getElementById('s-weather-effect').addEventListener('change', () => {
     document.getElementById('s-auto-weather').checked = false;
+    state.settings.weatherEffect = normalizeWeatherEffect(document.getElementById('s-weather-effect').value);
+    if (isEarthSelected() && typeof EarthTheme !== 'undefined' && typeof EarthTheme.setWeatherEffect === 'function') {
+      const devOverride = sessionStorage.getItem('dev-earth-override');
+      EarthTheme.setWeatherEffect(devOverride || state.settings.weatherEffect);
+    }
+    applySettings();
   });
   document.getElementById('overlay-opacity').addEventListener('input', e => {
     document.getElementById('overlay-val').textContent = parseFloat(e.target.value).toFixed(2);
@@ -3995,7 +4746,7 @@ function bindAll() {
   window.addEventListener('resize', () => {
     clearTimeout(starsResizeTimer);
     starsResizeTimer = setTimeout(() => {
-      if (getResolvedTheme() === 'galaxy') drawGalaxyStars();
+      if (isMilkywaySelected()) drawGalaxyStars();
       else if (getResolvedTheme() === 'default' && backgroundUsesStars()) drawStars();
       drawWeatherEffect();
     }, 120);

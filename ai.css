@@ -544,11 +544,17 @@ html, body {
 body[data-theme="galaxy"] {
   background:#000;
 }
+body[data-theme="milkyway"] {
+  background:#000;
+}
+body[data-theme="earth"] {
+  background:#000;
+}
 body[data-theme="liquid"] {
-  background: url('liquid-light.jpg') center/cover no-repeat, #efeafb;
+  background: url('Themes/macos/liquid-light.jpg') center/cover no-repeat, #efeafb;
 }
 body[data-theme="liquid"][data-liquid-variant="dark"] {
-  background-image: url('liquid-dark.jpg');
+  background-image: url('Themes/macos/liquid-dark.jpg');
 }
 body[data-theme="default"] { background:transparent; }
 

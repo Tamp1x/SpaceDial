@@ -50,8 +50,8 @@
 
 ### Appearance
 - **Theme switcher**: **Default** (time of day + weather), **MacOS** (flowing wallpapers with light/dark variants) or **Galaxy**
-- Galaxy theme — real Milky Way panorama (ESO, CC BY 4.0) with OLED-black space, a few subtle twinkling stars that drift away from your cursor, and the panorama extending behind the top bar
-- For Galaxy and MacOS themes the wallpaper/weather options are hidden and ignored; panels turn black in Galaxy
+- Galaxy theme — a single 3D theme with a **Galaxy body** picker that can show: **Earth** (realistic globe with real-time sunlight, day/night terminator, clouds, your weather city marker and eclipse rendering), the **Milky Way panorama** (ESO, CC BY 4.0) with mouse-reactive twinkling stars, or any other planet (Mercury, Venus, Mars, Jupiter, Saturn with rings, Uranus, Neptune) as a 3D sphere with real NASA/Solar System Scope surface textures — all planets rendered at the same size, drag to rotate and scroll to zoom
+- For Galaxy and MacOS themes the wallpaper/weather options are hidden and ignored; panels turn black
 - Animated Night, Sunrise, Day, Sunset atmosphere modes (Default theme)
 - Glass finish: **Standard**, **Liquid Glass** (bright, strongly blurred, high saturation) or **Tinted Glass** (darker, more muted) — applies to dials, widgets, panels, context menus, top bar and the AI chat
 - Tab switcher style: **Default (3D glass)**, **Flat (no 3D)**, **Liquid** or **Tinted** — same slide animation, different pill design
@@ -96,7 +96,6 @@ SpaceDial/
 ├── newtab.js              # All UI logic + settings
 ├── newtab.css             # All styles
 ├── Anurati-Regular.woff   # Bundled display font (no CDN)
-├── milkyway.jpg           # Galaxy theme Milky Way panorama (ESO, CC BY 4.0)
 ├── ai.html                # AI chat panel (loaded in iframe)
 ├── ai.js                  # AI chat logic — streaming, tools, encryption
 ├── ai.css                 # AI panel styles
@@ -106,6 +105,31 @@ SpaceDial/
 ├── speedtest.html         # Internal speed test panel
 ├── speedtest.js           # Speed test logic
 ├── manifest.json
+├── Themes/                # All theme assets live with their theme
+│   ├── default/theme.json
+│   ├── earth/             # Earth theme — 3D globe
+│   │   ├── three.min.js
+│   │   ├── earth-theme.js
+│   │   ├── earth-weather.js
+│   │   ├── earth-day.jpg
+│   │   ├── earth-night.jpg
+│   │   ├── earth-bump.png
+│   │   ├── earth-spec.png
+│   │   ├── moon.jpg
+│   │   ├── sun.jpg
+│   │   └── theme.json
+│   ├── galaxy/            # Galaxy theme — 3D planets
+│   │   ├── galaxy-theme.js
+│   │   ├── earth.jpg     # + mercury/venus/mars/jupiter/saturn/uranus/neptune textures
+│   │   ├── saturn-ring.png
+│   │   └── theme.json
+│   ├── milkyway/          # Galaxy body — Milky Way panorama (ESO, CC BY 4.0)
+│   │   ├── milkyway.jpg
+│   │   └── theme.json
+│   └── macos/             # MacOS theme — liquid light/dark variants
+│       ├── liquid-dark.jpg
+│       ├── liquid-light.jpg
+│       └── theme.json
 └── icons/
     ├── icon16.png
     ├── icon32.png
@@ -134,10 +158,11 @@ Settings are organised into **Appearance**, **Dials**, **Widgets**, **Music & Fo
 
 | Setting | Tab | Default | Description |
 |---|---|---|---|
-| Theme | Appearance | Default | `default`, `liquid` (MacOS — flowing wallpapers with light/dark variants) or `galaxy` (Milky Way) — non-default themes hide wallpaper/weather options |
+| Theme | Appearance | Default | `default`, `liquid` (MacOS — flowing wallpapers) or `galaxy` (3D planets with Earth/Milky Way sub-bodies, others hidden) — non-default themes hide wallpaper/weather options |
 | Background type | Appearance | Night | `night`, `sunrise`, `day`, `sunset` |
 | Auto day/night | Appearance | Off | Uses Open-Meteo sunrise/sunset |
 | Weather effect | Appearance | Clear | `clear`, `cloudy`, `rain`, `snow`, `fog` |
+| Galaxy body | Appearance | Earth | `milkyway` (panorama), `earth` (3D globe), `mercury`, `venus`, `mars`, `jupiter`, `saturn`, `uranus`, `neptune` (3D spheres with real textures) — shown only when theme is Galaxy |
 | Auto weather | Appearance | Off | Uses Open-Meteo current weather |
 | Overlay opacity | Appearance | 0.35 | Vignette darkness |
 | SpeedTest mode | Appearance | Ookla | `ookla` or `internal` |

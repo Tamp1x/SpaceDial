@@ -1,0 +1,9 @@
+{
+  "id": "default",
+  "name": "Default",
+  "description": "Classic SpaceDial with wallpapers and weather effects",
+  "icon": "🌍",
+  "hasWallpapers": true,
+  "hasWeatherEffects": true,
+  "files": []
+}

@@ -14,7 +14,10 @@
 
 <canvas id="stars-canvas"></canvas>
 <canvas id="galaxy-canvas"></canvas>
+<canvas id="planet-canvas" style="display:none"></canvas>
+<canvas id="earth-canvas" style="display:none"></canvas>
 <div id="bg-layer"></div>
+<div id="bg-layer-next" aria-hidden="true"></div>
 <canvas id="weather-layer"></canvas>
 <div id="bg-overlay"></div>
 <div id="fabric-overlay"></div>
@@ -289,7 +292,22 @@
           <label class="rl"><input type="radio" name="theme" value="liquid"> MacOS</label>
           <label class="rl"><input type="radio" name="theme" value="galaxy"> Galaxy</label>
         </div>
-        <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.04em">MacOS uses flowing wallpapers with a light/dark variant selector and a fabric-fold hover effect. Galaxy shows a real Milky Way panorama with twinkling stars that drift away from your cursor.</p>
+        <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.04em">MacOS uses flowing wallpapers with a light/dark variant selector and a fabric-fold hover effect. Galaxy combines a 3D solar-system viewer, the Earth globe with real-time sunlight, and the Milky Way panorama.</p>
+        <div id="s-galaxy-options" style="display:none;margin-top:10px">
+          <label class="field-label">Galaxy body</label>
+          <select id="s-galaxy-planet" class="field">
+            <option value="milkyway">Milky Way</option>
+            <option value="earth" selected>Earth</option>
+            <option value="mercury">Mercury</option>
+            <option value="venus">Venus</option>
+            <option value="mars">Mars</option>
+            <option value="jupiter">Jupiter</option>
+            <option value="saturn">Saturn (with rings)</option>
+            <option value="uranus">Uranus</option>
+            <option value="neptune">Neptune</option>
+            <option value="blackhole">Black Hole</option>
+          </select>
+        </div>
         <div id="s-liquid-variant-wrap" style="display:none;margin-top:10px">
           <label class="field-label">Liquid variant</label>
           <div class="radio-group">
@@ -306,14 +324,40 @@
         </select>
         <div id="s-auto-options">
         <label class="field-label" style="margin-top:14px">Wallpaper</label>
-        <div class="radio-group">
-          <label class="rl"><input type="radio" name="bg-type" value="night" checked> Night</label>
-          <label class="rl"><input type="radio" name="bg-type" value="sunrise"> Sunrise</label>
-          <label class="rl"><input type="radio" name="bg-type" value="day"> Day</label>
-          <label class="rl"><input type="radio" name="bg-type" value="sunset"> Sunset</label>
+        <div id="s-wallpaper-grid" class="wallpaper-grid"></div>
+        <p style="font-size:11px;color:var(--muted);margin-top:6px;letter-spacing:0.04em">Add images/videos to Wallpapers/ folder and run scan-wallpapers.ps1</p>
+        <div id="s-wallpaper-controls" style="display:none;margin-top:12px">
+          <label class="field-label">Wallpaper fit</label>
+          <div class="radio-group">
+            <label class="rl"><input type="radio" name="wallpaper-fit" value="cover" checked> Cover</label>
+            <label class="rl"><input type="radio" name="wallpaper-fit" value="contain"> Contain</label>
+            <label class="rl"><input type="radio" name="wallpaper-fit" value="stretch"> Stretch</label>
+            <label class="rl"><input type="radio" name="wallpaper-fit" value="center"> Center</label>
+          </div>
+          <label class="field-label" style="margin-top:10px">Zoom <span id="wallpaper-zoom-val" style="color:var(--text);font-variant-numeric:tabular-nums">100%</span></label>
+          <input type="range" id="s-wallpaper-zoom" min="50" max="200" step="5" value="100" class="slider">
+          <label class="field-label" style="margin-top:8px">Horizontal position <span id="wallpaper-x-val" style="color:var(--text);font-variant-numeric:tabular-nums">50%</span></label>
+          <input type="range" id="s-wallpaper-x" min="0" max="100" step="1" value="50" class="slider">
+          <label class="field-label" style="margin-top:8px">Vertical position <span id="wallpaper-y-val" style="color:var(--text);font-variant-numeric:tabular-nums">50%</span></label>
+          <input type="range" id="s-wallpaper-y" min="0" max="100" step="1" value="50" class="slider">
+          <div class="toggle-row" style="margin-top:10px">
+            <span>Blur overlay</span><label class="toggle"><input type="checkbox" id="s-wallpaper-blur"><span class="tog-slider"></span></label>
+          </div>
         </div>
+        <label class="field-label" style="margin-top:12px">Wallpaper (Default theme)</label>
+        <label class="field-label" style="margin-top:4px">Time of day <span id="s-bg-time-val" style="color:var(--text);font-variant-numeric:tabular-nums">12:00</span></label>
+        <input type="range" id="s-bg-time" min="0" max="24" step="0.5" value="12" class="slider">
+        <div class="sky-preset-row">
+          <button type="button" class="sky-preset" data-bgtime="4">Dawn</button>
+          <button type="button" class="sky-preset" data-bgtime="7">Sunrise</button>
+          <button type="button" class="sky-preset" data-bgtime="12">Noon</button>
+          <button type="button" class="sky-preset" data-bgtime="17">Evening</button>
+          <button type="button" class="sky-preset" data-bgtime="20">Dusk</button>
+          <button type="button" class="sky-preset" data-bgtime="0">Night</button>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.03em" id="bg-time-help">Smoothly flows between night, sunrise, day and sunset.</p>
         <div class="toggle-row" style="margin-top:12px">
-          <span>Auto day/night</span><label class="toggle"><input type="checkbox" id="s-auto-daynight"><span class="tog-slider"></span></label>
+          <span>Auto day/night (follow local time)</span><label class="toggle"><input type="checkbox" id="s-auto-daynight"><span class="tog-slider"></span></label>
         </div>
         <label class="field-label" style="margin-top:12px">Weather effect</label>
         <select id="s-weather-effect" class="field">
@@ -495,6 +539,16 @@
       <button class="btn-secondary" id="dev-integrity-btn">Integrity check</button>
       <button class="btn-secondary" id="dev-selftest-btn">Self test</button>
     </div>
+    <div class="s-section-title" style="margin-top:10px">Earth Weather Override</div>
+    <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Manual override for Earth theme weather. Resets on page reload.</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+      <button class="btn-mini dev-weather-btn" data-effect="clear">Clear</button>
+      <button class="btn-mini dev-weather-btn" data-effect="cloudy">Clouds</button>
+      <button class="btn-mini dev-weather-btn" data-effect="rain">Rain</button>
+      <button class="btn-mini dev-weather-btn" data-effect="snow">Snow</button>
+      <button class="btn-mini dev-weather-btn" data-effect="fog">Fog</button>
+    </div>
+    <p id="dev-weather-status" style="font-size:11px;color:var(--muted);min-height:16px"></p>
     <pre id="dev-integrity" style="max-height:140px;overflow:auto;font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-word"></pre>
     <div class="settings-footer">
       <button class="btn-secondary" id="dev-close">Close</button>
@@ -606,6 +660,46 @@
   <iframe id="ai-frame" title="SpaceDial AI Chat" loading="lazy"></iframe>
 </div>
 
+<!-- Earth sim-time control (bottom-left) -->
+<div id="earth-time-panel" style="display:none">
+  <button id="earth-time-toggle" title="Toggle time control">🕐</button>
+  <div id="earth-time-box">
+    <label>Simulated time <button id="earth-time-now" title="Back to real time">now</button></label>
+    <input type="datetime-local" id="earth-time-input" step="1">
+    <div class="earth-time-presets">
+      <span>Eclipses:</span>
+      <button data-ts="2027-08-02T18:00">2027-08-02</button>
+      <button data-ts="2026-08-12T23:00">2026-08-12</button>
+    </div>
+  </div>
+</div>
+
+<!-- Default-theme quick time & eclipse control (bottom-left) -->
+<div id="sky-time-panel" style="display:none">
+  <button id="sky-time-toggle" title="Toggle time of day / eclipse">☀</button>
+  <div id="sky-time-box">
+    <div class="sky-quick-presets">
+      <span>Time of day:</span>
+      <button data-sky="0">Night</button>
+      <button data-sky="7">Morning</button>
+      <button data-sky="12">Day</button>
+      <button data-sky="17">Evening</button>
+      <button data-sky="now">Now</button>
+    </div>
+    <div class="sky-eclipse-row">
+      <span>Solar eclipse:</span>
+      <button id="sky-eclipse-now" title="Simulate the next real solar eclipse">Preview</button>
+      <button id="sky-eclipse-clear" title="Clear eclipse preview">Clear</button>
+    </div>
+    <div id="sky-eclipse-status">Next: …</div>
+  </div>
+</div>
+
+<script src="console-capture.js"></script>
+<script src="Themes/earth/three.min.js"></script>
+<script src="Themes/earth/earth-theme.js"></script>
+<script src="Themes/earth/earth-weather.js"></script>
+<script src="Themes/galaxy/galaxy-theme.js"></script>
 <script src="newtab.js"></script>
 </body>
 </html>

@@ -1,0 +1,9 @@
+{
+  "id": "milkyway",
+  "name": "Milky Way",
+  "description": "Interactive Milky Way panorama with mouse-reactive stars",
+  "icon": "?",
+  "hasWallpapers": false,
+  "hasWeatherEffects": false,
+  "files": ["milkyway.jpg"]
+}

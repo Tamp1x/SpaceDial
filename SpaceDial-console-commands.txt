@@ -1,0 +1,37 @@
+SpaceDial — консольные команды
+
+Откройте новую вкладку SpaceDial, нажмите F12 → Console и выполните команды.
+Команды сохраняют настройки так же, как обычный интерфейс.
+
+Получить текущее состояние:
+SpaceDial.getState()
+
+Переключить тему:
+SpaceDial.setTheme('default')
+SpaceDial.setTheme('liquid')
+SpaceDial.setTheme('galaxy')
+
+Выбрать тело в Galaxy:
+SpaceDial.setGalaxyBody('earth')
+SpaceDial.setGalaxyBody('milkyway')
+SpaceDial.setGalaxyBody('jupiter')
+SpaceDial.setGalaxyBody('blackhole')
+
+Установить время Default-темы (часы от 0 до 24):
+SpaceDial.setTime(6)
+SpaceDial.setTime(12)
+SpaceDial.setTime(18)
+SpaceDial.setTime(23)
+
+Включить/выключить автоматическое местное время:
+SpaceDial.setAutoTime(true)
+SpaceDial.setAutoTime(false)
+
+Предпросмотр/очистка затмения:
+SpaceDial.previewEclipse()
+SpaceDial.clearEclipse()
+
+Убрать сохранённые обои и вернуть динамическое небо:
+SpaceDial.clearWallpaper()
+
+Если команды не определены, обновите страницу после полного перезапуска расширения.

@@ -82,6 +82,16 @@
   --panel-bg:     #050507;
   --ctx-bg:       #07070b;
 }
+:root[data-bg="earth"] {
+  --bg:           #000;
+  --surface:      rgba(255,255,255,0.05);
+  --surface-hov:  rgba(255,255,255,0.09);
+  --surface-act:  rgba(255,255,255,0.13);
+  --border:       rgba(255,255,255,0.1);
+  --border-hov:   rgba(255,255,255,0.22);
+  --panel-bg:     #050507;
+  --ctx-bg:       #07070b;
+}
 :root[data-bg="liquid"] {
   --bg:           #0a0c14;
   --surface:      rgba(255,255,255,0.06);
@@ -99,9 +109,13 @@ body.animating-modal { overflow:hidden; }
 /* ─── Background layers ──────────────────────────────────── */
 #stars-canvas { position:fixed; inset:0; z-index:0; pointer-events:none; }
 #galaxy-canvas { position:fixed; inset:0; z-index:2; pointer-events:none; }
+#earth-canvas { position:fixed; inset:0; z-index:2; pointer-events:none; }
+#planet-canvas { position:fixed; inset:0; z-index:2; pointer-events:none; }
 #bg-layer,
+#bg-layer-next,
 #weather-layer { position:fixed; inset:0; pointer-events:none; }
 #bg-layer     { z-index:1; background-size:cover; background-position:center; transition:background 1.2s ease, opacity 1.2s ease; }
+#bg-layer-next { z-index:1; opacity:0; background-size:cover; background-position:center; transition:opacity 1.2s ease; }
 #weather-layer { z-index:2; opacity:0.96; }
 :root[data-weather="cloudy"][data-bg="day"] #weather-layer,
 :root[data-weather="cloudy"][data-bg="sunrise"] #weather-layer {
@@ -109,6 +123,37 @@ body.animating-modal { overflow:hidden; }
   mix-blend-mode:normal;
 }
 #bg-overlay   { position:fixed; inset:0; z-index:3; background:linear-gradient(to bottom,rgba(0,0,0,var(--overlay-op)) 0%,transparent 35%,transparent 65%,rgba(0,0,0,var(--overlay-op)) 100%); pointer-events:none; }
+
+/* Earth sim-time control */
+#earth-time-panel { position:fixed; left:14px; bottom:14px; z-index:600; display:flex; flex-direction:column; align-items:flex-start; gap:8px; }
+#earth-time-toggle { width:34px; height:34px; border-radius:50%; border:1px solid var(--border); background:rgba(20,20,25,0.65); color:var(--text); font-size:15px; cursor:pointer; backdrop-filter:blur(6px); }
+#earth-time-toggle:hover { border-color:var(--accent,rgba(160,180,255,0.6)); }
+#earth-time-box { display:none; flex-direction:column; gap:8px; padding:12px; border:1px solid var(--border); border-radius:12px; background:rgba(20,20,25,0.8); backdrop-filter:blur(10px); box-shadow:0 8px 30px rgba(0,0,0,0.4); }
+#earth-time-panel.open #earth-time-box { display:flex; }
+#earth-time-box label { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+#earth-time-now { font-size:11px; text-transform:none; letter-spacing:0; padding:2px 8px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; }
+#earth-time-now:hover { border-color:var(--accent); }
+#earth-time-input { color:var(--text); background:rgba(255,255,255,0.06); border:1px solid var(--border); border-radius:8px; padding:6px 8px; font:inherit; }
+#earth-time-box label[for=earth-time-input] { display:block; }
+.earth-time-presets { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:11px; color:var(--muted); }
+.earth-time-presets button { font-size:11px; padding:3px 8px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; }
+.earth-time-presets button:hover { border-color:var(--accent); }
+
+/* Default-theme quick time & eclipse panel (bottom-left) */
+#sky-time-panel { position:fixed; left:14px; bottom:14px; z-index:600; display:flex; flex-direction:column; align-items:flex-start; gap:8px; }
+#sky-time-toggle { width:34px; height:34px; border-radius:50%; border:1px solid var(--border); background:rgba(20,20,25,0.65); color:var(--text); font-size:15px; cursor:pointer; backdrop-filter:blur(6px); }
+#sky-time-toggle:hover { border-color:var(--accent,rgba(160,180,255,0.6)); }
+#sky-time-box { display:none; flex-direction:column; gap:8px; padding:12px; border:1px solid var(--border); border-radius:12px; background:rgba(20,20,25,0.8); backdrop-filter:blur(10px); box-shadow:0 8px 30px rgba(0,0,0,0.4); max-width:230px; }
+#sky-time-panel.open #sky-time-box { display:flex; }
+.sky-quick-presets, .sky-eclipse-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:11px; color:var(--muted); }
+.sky-quick-presets span, .sky-eclipse-row span { text-transform:uppercase; letter-spacing:.04em; font-size:10px; }
+.sky-quick-presets button, .sky-eclipse-row button { font-size:11px; padding:3px 8px; border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--text); cursor:pointer; }
+.sky-quick-presets button:hover, .sky-eclipse-row button:hover { border-color:var(--accent); }
+#sky-eclipse-status { font-size:11px; color:var(--muted); letter-spacing:.03em; }
+.sky-preset-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.sky-preset { font-size:11px; padding:3px 9px; border-radius:8px; border:1px solid var(--border); background:rgba(255,255,255,0.04); color:var(--text); cursor:pointer; transition:border-color .15s; }
+.sky-preset:hover { border-color:var(--accent); }
+
 
 #bg-layer.bg-night {
   background:
@@ -131,21 +176,27 @@ body.animating-modal { overflow:hidden; }
     radial-gradient(circle at 72% 70%, rgba(255,139,77,0.9) 0 7%, rgba(228,83,92,0.28) 20%, transparent 38%),
     linear-gradient(180deg, rgba(39,34,76,0.62) 0%, rgba(111,63,111,0.8) 46%, rgba(225,103,72,0.76) 72%, rgba(9,10,24,0.9) 100%);
 }
-#bg-layer.bg-galaxy {
-  background: url('milkyway.jpg') center/cover no-repeat, #000;
+#bg-layer.bg-planet {
+  background: radial-gradient(120% 80% at 50% 40%, #0a0a14 0%, #030307 60%, #000 100%);
+}
+#bg-layer.bg-milkyway {
+  background: url('Themes/milkyway/milkyway.jpg') center/cover no-repeat, #000;
   background-size: auto 115%;
   filter: brightness(0.62) saturate(1.15) contrast(1.15);
 }
-#bg-layer.bg-galaxy::after {
+#bg-layer.bg-milkyway::after {
   content: '';
   position: absolute; inset: 0;
   background: radial-gradient(115% 45% at 50% 50%, transparent 40%, rgba(0,0,0,0.5) 70%, #000 100%);
 }
+#bg-layer.bg-earth {
+  background: transparent;
+}
 #bg-layer.bg-liquid {
-  background: url('liquid-light.jpg') center/cover no-repeat, #efeafb;
+  background: url('Themes/macos/liquid-light.jpg') center/cover no-repeat, #efeafb;
 }
 :root[data-liquid-variant="dark"] #bg-layer.bg-liquid {
-  background-image: url('liquid-dark.jpg');
+  background-image: url('Themes/macos/liquid-dark.jpg');
 }
 #bg-layer.bg-liquid::after {
   content:''; position:absolute; inset:0; pointer-events:none;
@@ -1689,3 +1740,58 @@ textarea.field { font-size:14px; }
   backdrop-filter:blur(6px);
 }
 #offline-banner.online-hide { display:none; }
+
+/* ─── Dev weather buttons ──────────────────────────────────── */
+.dev-weather-btn.active {
+  background: rgba(100, 180, 255, 0.25) !important;
+  border-color: rgba(100, 180, 255, 0.5) !important;
+  color: #fff !important;
+}
+
+/* ─── Wallpaper Grid ──────────────────────────────────────── */
+.wallpaper-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.wallpaper-card {
+  cursor: pointer;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  transition: all 0.2s ease;
+  background: var(--surface);
+}
+.wallpaper-card:hover {
+  border-color: rgba(255,255,255,0.2);
+  transform: scale(1.05);
+}
+.wallpaper-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(255,255,255,0.2);
+}
+.wallpaper-preview {
+  width: 100%;
+  aspect-ratio: 16/9;
+  overflow: hidden;
+  position: relative;
+}
+.wallpaper-preview img,
+.wallpaper-preview video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.wallpaper-name {
+  padding: 4px 6px;
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

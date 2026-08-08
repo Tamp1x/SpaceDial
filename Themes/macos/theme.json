@@ -1,0 +1,10 @@
+{
+  "id": "liquid",
+  "name": "MacOS",
+  "description": "Flowing liquid glass design with light and dark variants",
+  "icon": "💧",
+  "hasWallpapers": false,
+  "hasWeatherEffects": false,
+  "files": ["liquid-dark.jpg", "liquid-light.jpg"],
+  "variants": ["light", "dark"]
+}
