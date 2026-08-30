@@ -1,0 +1,10 @@
+{
+  "id": "earth",
+  "name": "Earth",
+  "description": "Realistic 3D globe with day/night cycle, clouds, and weather",
+  "icon": "🌐",
+  "hasWallpapers": false,
+  "hasWeatherEffects": false,
+  "files": ["three.min.js", "earth-theme.js", "earth-weather.js", "earth-day.jpg", "earth-night.jpg", "earth-bump.png", "earth-spec.png", "moon.jpg", "sun.jpg"],
+  "settings": ["weatherCity"]
+}

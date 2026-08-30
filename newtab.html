@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SpaceDial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="newtab.css">
+</head>
+<body>
+
+<div id="offline-banner" style="display:none">⚠ Offline — some features (weather, AI, icons, updates) may not work</div>
+
+<canvas id="stars-canvas"></canvas>
+<canvas id="galaxy-canvas"></canvas>
+<canvas id="planet-canvas" style="display:none"></canvas>
+<canvas id="earth-canvas" style="display:none"></canvas>
+<canvas id="sleep-canvas" style="display:none"></canvas>
+<div id="bg-layer"></div>
+<div id="bg-layer-next" aria-hidden="true"></div>
+<canvas id="weather-layer"></canvas>
+<div id="bg-overlay"></div>
+<div id="fabric-overlay"></div>
+
+<div id="tab-bar">
+  <div id="tabs-scroll"><div id="tabs-list"></div></div>
+  <button id="add-tab-btn" title="New group">＋</button>
+  <!-- Focus mode button: shield icon -->
+  <button id="focus-btn" title="Focus mode">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+  </button>
+  <button id="speedtest-btn" title="Open SpeedTest">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 14a8 8 0 1 1 16 0"/>
+      <path d="M12 14l4-4"/>
+      <circle cx="12" cy="14" r="1.5"/>
+    </svg>
+  </button>
+  <button id="ai-btn" title="AI Chat">AI</button>
+  <button id="settings-btn" title="Settings">⚙</button>
+  <button id="import-export-btn" title="Backup &amp; Sync" style="display:none">⇅</button>
+</div>
+
+<div id="focus-bar" style="display:none">
+  <div id="focus-bar-label"></div>
+  <div id="focus-bar-timer"></div>
+  <button id="focus-bar-end">End</button>
+</div>
+
+<div id="view-home" class="view active">
+  <div id="home-center">
+    <div id="clock-block">
+      <div id="day-name"></div>
+      <div id="date-line"></div>
+      <div id="time-line"></div>
+    </div>
+    <div id="weather-block">
+      <div id="weather-current">
+        <div id="weather-icon-wrap"><div id="weather-icon"></div></div>
+        <div id="weather-info">
+          <div id="weather-city">—</div>
+          <div id="weather-desc">—</div>
+        </div>
+      </div>
+      <div id="weather-forecast"></div>
+    </div>
+    <div id="player-block">
+      <div id="player-track-info">
+        <div id="player-title">No track loaded</div>
+        <div id="player-artist"></div>
+      </div>
+      <div id="player-progress-wrap">
+        <span id="player-current">0:00</span>
+        <input type="range" id="player-seek" min="0" max="100" value="0" step="0.1">
+        <span id="player-duration">0:00</span>
+      </div>
+      <div id="player-controls">
+        <button id="btn-prev" class="pc-btn" title="Previous">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2" width="2.5" height="12" rx="1"/><path d="M14 3.2L5.5 8l8.5 4.8z"/></svg>
+        </button>
+        <button id="btn-play" class="pc-btn pc-main" title="Play / Pause">
+          <svg id="icon-play" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5L13.5 8 4 13.5z"/></svg>
+          <svg id="icon-pause" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="display:none"><rect x="3" y="2" width="3.5" height="12" rx="1.2"/><rect x="9.5" y="2" width="3.5" height="12" rx="1.2"/></svg>
+        </button>
+        <button id="btn-next" class="pc-btn" title="Next">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="12.5" y="2" width="2.5" height="12" rx="1"/><path d="M2 3.2L10.5 8 2 12.8z"/></svg>
+        </button>
+        <button id="btn-shuffle" class="pc-btn pc-toggle" title="Shuffle">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 4h3l7 8h3M14 4h-3L9.5 6M14 12v-2M14 4v2M1 12h3l1.5-2"/></svg>
+        </button>
+        <button id="btn-repeat" class="pc-btn pc-toggle" title="Repeat">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h10a2 2 0 012 2v2M14 12H4a2 2 0 01-2-2V8"/><polyline points="12 2 14 4 12 6"/><polyline points="4 10 2 12 4 14"/></svg>
+        </button>
+        <div id="vol-wrap">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style="opacity:.4;flex-shrink:0"><path d="M3 6H1v4h2l4 3V3L3 6zm8.5-.5a4 4 0 010 5"/></svg>
+          <input type="range" id="player-vol" min="0" max="1" step="0.01" value="1">
+        </div>
+      </div>
+      <div id="player-source-btns">
+        <!-- Folder SVG icon -->
+        <button class="src-btn" id="btn-load-file">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:middle"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          File / Folder
+        </button>
+        <button class="src-btn" id="btn-load-folder">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:middle"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M8 12h8M12 8v8"/></svg>
+          Folder
+        </button>
+        <!-- Link/chain SVG icon -->
+        <button class="src-btn" id="btn-load-url">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:middle"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+          URL / Stream
+        </button>
+        <button class="src-btn" id="btn-unload-all">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:middle"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 11v5M14 11v5"/></svg>
+          Unload All
+        </button>
+      </div>
+      <input type="file" id="file-input" accept="audio/*" multiple style="display:none">
+      <input type="file" id="folder-input" accept="audio/*" webkitdirectory directory multiple style="display:none">
+    </div>
+
+    <!-- Notes widget -->
+    <div id="notes-block">
+      <div id="notes-header">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        <span>Notes</span>
+      </div>
+      <textarea id="notes-area" placeholder="Write something…" spellcheck="false"></textarea>
+    </div>
+  </div>
+</div>
+
+<div id="view-dials" class="view">
+  <div id="dials-container">
+    <div id="dials-grid"></div>
+  </div>
+</div>
+
+<!-- Music leave prompt -->
+<div id="music-prompt" class="overlay-panel" style="display:none">
+  <div class="panel-box small-box" style="text-align:center">
+    <div style="margin-bottom:12px">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" stroke-linecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+    </div>
+    <div class="panel-title" style="margin-bottom:6px">Music is playing</div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:20px">You switched tabs. Keep the music going?</p>
+    <div class="row-btns" style="justify-content:center;gap:12px">
+      <button class="btn-danger" id="mp-stop">Stop</button>
+      <button class="btn-primary" id="mp-keep">Keep playing</button>
+    </div>
+  </div>
+</div>
+
+<!-- URL modal -->
+<div id="modal-url" class="overlay-panel" style="display:none">
+  <div class="panel-box small-box">
+    <div class="panel-title">Add stream / URL</div>
+    <input type="url" id="stream-url-input" placeholder="https://... or direct .mp3 link" class="field">
+    <div class="row-btns" style="margin-top:14px">
+      <button class="btn-secondary" id="modal-url-cancel">Cancel</button>
+      <button class="btn-primary" id="modal-url-ok">Load</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Dial -->
+<div id="modal-dial" class="overlay-panel" style="display:none">
+  <div class="panel-box">
+    <div class="panel-title" id="modal-dial-title">Add Dial</div>
+    <label class="field-label">Name</label>
+    <input type="text" id="dial-name-inp" class="field" placeholder="My Site">
+    <label class="field-label" id="dial-url-label">URL</label>
+    <input type="url" id="dial-url-inp" class="field" placeholder="https://example.com">
+    <label class="field-label">Icon</label>
+    <div class="radio-group">
+      <label class="rl"><input type="radio" name="icon-src" value="auto" checked> Auto favicon</label>
+      <label class="rl"><input type="radio" name="icon-src" value="search"> Search icon</label>
+      <label class="rl"><input type="radio" name="icon-src" value="upload"> Upload image</label>
+    </div>
+    <div id="icon-search-area" style="display:none">
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input type="text" id="icon-search-inp" class="field" placeholder="Search icon…" style="flex:1">
+        <button class="btn-secondary" id="icon-search-btn">Search</button>
+      </div>
+      <div id="icon-source-tabs">
+        <button class="isrc-tab active" data-src="duckduckgo">DuckDuckGo</button>
+        <button class="isrc-tab" data-src="google">Google</button>
+        <button class="isrc-tab" data-src="clearbit">Clearbit</button>
+        <button class="isrc-tab" data-src="brandfetch">Brandfetch</button>
+        <button class="isrc-tab" data-src="iconhorse">Icon.Horse</button>
+      </div>
+      <div id="icon-results"></div>
+      <div id="icon-selected-preview" style="display:none">
+        <img id="icon-sel-img" src="" alt="">
+        <span id="icon-sel-label">Selected</span>
+        <button class="btn-mini" id="icon-sel-clear">✕</button>
+      </div>
+    </div>
+    <div id="icon-upload-area" style="display:none;margin-top:8px">
+      <input type="file" id="dial-icon-file" accept="image/*" style="display:none">
+      <div class="file-picker-row">
+        <button type="button" class="btn-secondary file-picker-btn" id="dial-icon-file-btn">Choose image</button>
+        <span class="file-picker-name" id="dial-icon-file-name">No file selected</span>
+      </div>
+      <img id="dial-icon-preview" src="" alt="" style="display:none;width:48px;height:48px;border-radius:8px;margin-top:8px;object-fit:contain">
+    </div>
+    <div id="folder-cover-area" style="display:none;margin-top:12px">
+      <label class="field-label">Folder cover from dial</label>
+      <select id="folder-cover-select" class="field"></select>
+      <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.04em">Pick a dial inside this folder to reuse its icon as the folder picture.</p>
+    </div>
+    <div id="folder-style-area" style="display:none;margin-top:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <label class="field-label" style="margin:0">Windows 11 Glass Style</label>
+        <label class="toggle">
+          <input type="checkbox" id="folder-win11-style-chk">
+          <span class="tog-slider"></span>
+        </label>
+      </div>
+      <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.04em">Apply a folder-shaped card and a Windows 11 style glass folder icon.</p>
+    </div>
+    <label class="field-label" style="margin-top:12px">Dial icon scale</label>
+    <select id="dial-icon-scale-inp" class="field">
+      <option value="0">0%</option>
+      <option value="25">25%</option>
+      <option value="50">50%</option>
+      <option value="75">75%</option>
+      <option value="100" selected>100%</option>
+      <option value="125">125%</option>
+      <option value="150">150%</option>
+      <option value="175">175%</option>
+      <option value="200">200%</option>
+    </select>
+    <div class="row-btns" style="margin-top:22px">
+      <button class="btn-secondary" id="modal-dial-cancel">Cancel</button>
+      <button class="btn-primary" id="modal-dial-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tab rename -->
+<div id="modal-tab" class="overlay-panel" style="display:none">
+  <div class="panel-box small-box">
+    <div class="panel-title" id="modal-tab-title">Rename Group</div>
+    <input type="text" id="tab-name-inp" class="field">
+    <div class="row-btns" style="margin-top:14px">
+      <button class="btn-danger" id="tab-delete-btn" style="display:none">Delete</button>
+      <button class="btn-secondary" id="modal-tab-cancel">Cancel</button>
+      <button class="btn-primary" id="modal-tab-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Context menu -->
+<div id="ctx-menu" style="display:none">
+  <div class="ctx-item" id="ctx-edit">✎  Edit</div>
+  <div class="ctx-item" id="ctx-move">→  Move to…</div>
+  <div class="ctx-item ctx-danger" id="ctx-del">✕  Delete</div>
+</div>
+<div id="ctx-move-sub" style="display:none"></div>
+<div id="topbar-ctx-menu" style="display:none">
+  <div class="ctx-item" id="topbar-new-tab">＋  New group</div>
+</div>
+<div id="create-ctx-menu" style="display:none">
+  <div class="ctx-item" id="create-dial">＋  New dial</div>
+  <div class="ctx-item" id="create-folder">▦  New folder</div>
+</div>
+
+<!-- Settings -->
+<div id="modal-settings" class="overlay-panel" style="display:none">
+  <div class="panel-box settings-box">
+    <div class="panel-title">Settings</div>
+    <div class="settings-scroll">
+    <div class="settings-nav">
+      <button class="settings-nav-btn active" data-section="appearance">Appearance</button>
+      <button class="settings-nav-btn" data-section="dials">Dials</button>
+      <button class="settings-nav-btn" data-section="widgets">Widgets</button>
+      <button class="settings-nav-btn" data-section="music">Music &amp; Focus</button>
+      <button class="settings-nav-btn" data-section="ai">AI</button>
+      <button class="settings-nav-btn" data-section="backup">Backup</button>
+      <button class="settings-nav-btn" data-section="updates">Updates</button>
+    </div>
+    <div class="settings-grid">
+      <div class="s-section active" data-section="appearance">
+        <div class="s-section-title">Appearance</div>
+        <label class="field-label">Theme</label>
+        <div class="radio-group">
+          <label class="rl"><input type="radio" name="theme" value="default" checked> Default</label>
+          <label class="rl"><input type="radio" name="theme" value="liquid"> MacOS</label>
+          <label class="rl"><input type="radio" name="theme" value="galaxy"> Galaxy</label>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.04em">MacOS uses flowing wallpapers with a light/dark variant selector and a fabric-fold hover effect. Galaxy combines a 3D solar-system viewer, the Earth globe with real-time sunlight, and the Milky Way panorama.</p>
+        <div id="s-galaxy-options" style="display:none;margin-top:10px">
+          <label class="field-label">Galaxy body</label>
+          <select id="s-galaxy-planet" class="field">
+            <option value="milkyway">Milky Way</option>
+            <option value="earth" selected>Earth</option>
+            <option value="mercury">Mercury</option>
+            <option value="venus">Venus</option>
+            <option value="mars">Mars</option>
+            <option value="jupiter">Jupiter</option>
+            <option value="saturn">Saturn (with rings)</option>
+            <option value="uranus">Uranus</option>
+            <option value="neptune">Neptune</option>
+            <option value="blackplanet">Black Planet</option>
+            <option value="blackhole">Black Hole</option>
+          </select>
+        </div>
+        <div id="s-liquid-variant-wrap" style="display:none;margin-top:10px">
+          <label class="field-label">Liquid variant</label>
+          <div class="radio-group">
+            <label class="rl"><input type="radio" name="liquid-variant" value="light" checked> Light</label>
+            <label class="rl"><input type="radio" name="liquid-variant" value="dark"> Dark</label>
+          </div>
+        </div>
+        <label class="field-label" style="margin-top:14px">Tab switcher style</label>
+        <select id="s-tab-style" class="field">
+          <option value="default" selected>Default (3D glass)</option>
+          <option value="flat">Flat (no 3D)</option>
+          <option value="liquid">Liquid Glass</option>
+          <option value="tinted">Tinted Glass</option>
+        </select>
+        <div id="s-auto-options">
+        <label class="field-label" style="margin-top:14px">Wallpaper</label>
+        <div id="s-wallpaper-grid" class="wallpaper-grid"></div>
+        <p style="font-size:11px;color:var(--muted);margin-top:6px;letter-spacing:0.04em">Add images/videos to Wallpapers/ folder and run scan-wallpapers.ps1</p>
+        <div id="s-wallpaper-controls" style="display:none;margin-top:12px">
+          <label class="field-label">Wallpaper fit</label>
+          <div class="radio-group">
+            <label class="rl"><input type="radio" name="wallpaper-fit" value="cover" checked> Cover</label>
+            <label class="rl"><input type="radio" name="wallpaper-fit" value="contain"> Contain</label>
+            <label class="rl"><input type="radio" name="wallpaper-fit" value="stretch"> Stretch</label>
+            <label class="rl"><input type="radio" name="wallpaper-fit" value="center"> Center</label>
+          </div>
+          <label class="field-label" style="margin-top:10px">Zoom <span id="wallpaper-zoom-val" style="color:var(--text);font-variant-numeric:tabular-nums">100%</span></label>
+          <input type="range" id="s-wallpaper-zoom" min="50" max="200" step="5" value="100" class="slider">
+          <label class="field-label" style="margin-top:8px">Horizontal position <span id="wallpaper-x-val" style="color:var(--text);font-variant-numeric:tabular-nums">50%</span></label>
+          <input type="range" id="s-wallpaper-x" min="0" max="100" step="1" value="50" class="slider">
+          <label class="field-label" style="margin-top:8px">Vertical position <span id="wallpaper-y-val" style="color:var(--text);font-variant-numeric:tabular-nums">50%</span></label>
+          <input type="range" id="s-wallpaper-y" min="0" max="100" step="1" value="50" class="slider">
+          <div class="toggle-row" style="margin-top:10px">
+            <span>Blur overlay</span><label class="toggle"><input type="checkbox" id="s-wallpaper-blur"><span class="tog-slider"></span></label>
+          </div>
+        </div>
+        <label class="field-label" style="margin-top:12px">Wallpaper (Default theme)</label>
+        <label class="field-label" style="margin-top:4px">Time of day <span id="s-bg-time-val" style="color:var(--text);font-variant-numeric:tabular-nums">12:00</span></label>
+        <input type="range" id="s-bg-time" min="0" max="24" step="0.5" value="12" class="slider">
+        <div class="sky-preset-row">
+          <button type="button" class="sky-preset" data-bgtime="4">Dawn</button>
+          <button type="button" class="sky-preset" data-bgtime="7">Sunrise</button>
+          <button type="button" class="sky-preset" data-bgtime="12">Noon</button>
+          <button type="button" class="sky-preset" data-bgtime="17">Evening</button>
+          <button type="button" class="sky-preset" data-bgtime="20">Dusk</button>
+          <button type="button" class="sky-preset" data-bgtime="0">Night</button>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.03em" id="bg-time-help">Smoothly flows between night, sunrise, day and sunset.</p>
+        <div class="toggle-row" style="margin-top:12px">
+          <span>Auto day/night (follow local time)</span><label class="toggle"><input type="checkbox" id="s-auto-daynight"><span class="tog-slider"></span></label>
+        </div>
+        <label class="field-label" style="margin-top:12px">Weather effect</label>
+        <select id="s-weather-effect" class="field">
+          <option value="clear" selected>Clear</option>
+          <option value="cloudy">Cloudy</option>
+          <option value="rain">Rain</option>
+          <option value="snow">Snow</option>
+          <option value="fog">Fog</option>
+        </select>
+        <div class="toggle-row" style="margin-top:12px">
+          <span>Auto weather</span><label class="toggle"><input type="checkbox" id="s-auto-weather"><span class="tog-slider"></span></label>
+        </div>
+        </div>
+        <label class="field-label" style="margin-top:14px">Overlay opacity <span id="overlay-val" style="color:var(--text);font-variant-numeric:tabular-nums">0.35</span></label>
+        <input type="range" id="overlay-opacity" min="0" max="0.9" step="0.05" value="0.35" class="slider">
+        <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.04em">Controls darkness of top/bottom vignette over background</p>
+        <label class="field-label" style="margin-top:12px">SpeedTest button mode</label>
+        <select id="s-speedtest-mode" class="field">
+          <option value="ookla" selected>Open SpeedTest by Ookla</option>
+          <option value="internal">Open built-in SpeedTest panel</option>
+        </select>
+        <p style="font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:0.04em">Built-in mode uses browser-accessible test endpoints; Ookla opens externally because their test data is not exposed as a public in-page API.</p>
+        <div class="s-section-title" style="margin-top:20px">Top bar</div>
+        <div class="toggle-row"><span>Show add group</span><label class="toggle"><input type="checkbox" id="s-show-add-tab" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Show focus mode</span><label class="toggle"><input type="checkbox" id="s-show-focus-btn" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Show SpeedTest</span><label class="toggle"><input type="checkbox" id="s-show-speedtest-btn" checked><span class="tog-slider"></span></label></div>
+      </div>
+      <div class="s-section" data-section="dials">
+        <div class="s-section-title">Dials</div>
+        <label class="field-label">Columns</label>
+        <select id="s-cols" class="field">
+          <option value="2">2</option><option value="3">3</option><option value="4">4</option>
+          <option value="5" selected>5</option><option value="6">6</option><option value="7">7</option>
+        </select>
+        <label class="field-label" style="margin-top:12px">Dial shape</label>
+        <select id="s-shape" class="field">
+          <option value="wide">Wide (16:9)</option>
+          <option value="square">Square (1:1)</option>
+          <option value="tall">Tall (3:4)</option>
+        </select>
+        <label class="field-label" style="margin-top:12px">Dial icon scale</label>
+        <select id="s-dial-icon-scale" class="field">
+          <option value="0">0%</option>
+          <option value="25">25%</option>
+          <option value="50">50%</option>
+          <option value="75">75%</option>
+          <option value="100" selected>100%</option>
+          <option value="125">125%</option>
+          <option value="150">150%</option>
+          <option value="175">175%</option>
+          <option value="200">200%</option>
+        </select>
+        <div class="toggle-row" style="margin-top:14px">
+          <span>Show label</span><label class="toggle"><input type="checkbox" id="s-show-label" checked><span class="tog-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Show favicon</span><label class="toggle"><input type="checkbox" id="s-show-favicon" checked><span class="tog-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Show footer bar</span><label class="toggle"><input type="checkbox" id="s-show-footer" checked><span class="tog-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Hover zoom</span><label class="toggle"><input type="checkbox" id="s-hover-zoom" checked><span class="tog-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Glass style</span><label class="toggle"><input type="checkbox" id="s-glass" checked><span class="tog-slider"></span></label>
+        </div>
+        <label class="field-label" style="margin-top:10px">Glass finish</label>
+        <select id="s-glass-style" class="field">
+          <option value="standard" selected>Standard</option>
+          <option value="liquid">Liquid Glass</option>
+          <option value="tinted">Tinted Glass</option>
+        </select>
+        <div class="toggle-row">
+          <span>Show border</span><label class="toggle"><input type="checkbox" id="s-border" checked><span class="tog-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Show ADD DIAL button</span><label class="toggle"><input type="checkbox" id="s-show-add-dial" checked><span class="tog-slider"></span></label>
+        </div>
+      </div>
+      <div class="s-section" data-section="widgets">
+        <div class="s-section-title">Widgets</div>
+        <div class="toggle-row"><span>Show clock</span><label class="toggle"><input type="checkbox" id="s-show-clock" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>24h format</span><label class="toggle"><input type="checkbox" id="s-24h" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Show seconds</span><label class="toggle"><input type="checkbox" id="s-seconds"><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Show weather</span><label class="toggle"><input type="checkbox" id="s-show-weather" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Weather forecast</span><label class="toggle"><input type="checkbox" id="s-show-weather-forecast" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Music player</span><label class="toggle"><input type="checkbox" id="s-show-player" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Notes</span><label class="toggle"><input type="checkbox" id="s-show-notes" checked><span class="tog-slider"></span></label></div>
+        <label class="field-label" style="margin-top:14px">Weather city</label>
+        <input type="text" id="s-weather-city" class="field" placeholder="Dublin">
+        <label class="field-label" style="margin-top:12px">Forecast range</label>
+        <select id="s-weather-forecast-days" class="field">
+          <option value="7" selected>7 days</option>
+          <option value="16">16 days</option>
+        </select>
+        <label class="field-label" style="margin-top:12px">Temperature</label>
+        <select id="s-temp-unit" class="field">
+          <option value="celsius" selected>Celsius (°C)</option>
+          <option value="fahrenheit">Fahrenheit (°F)</option>
+        </select>
+      </div>
+      <div class="s-section" data-section="music">
+        <div class="s-section-title">Music</div>
+        <label class="field-label">When tab loses focus (switching browser tabs)</label>
+        <select id="s-music-leave" class="field">
+          <option value="ask">Ask each time</option>
+          <option value="stop" selected>Always stop</option>
+          <option value="continue">Always continue</option>
+        </select>
+        <div class="toggle-row" style="margin-top:14px"><span>Autoplay on open</span><label class="toggle"><input type="checkbox" id="s-autoplay"><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Loop playlist</span><label class="toggle"><input type="checkbox" id="s-loop" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row"><span>Shuffle on start</span><label class="toggle"><input type="checkbox" id="s-shuffle-start"><span class="tog-slider"></span></label></div>
+
+        <div class="s-section-title" style="margin-top:20px">Sleep Mode</div>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:10px;letter-spacing:0.04em">Automatically enters a power-saving sleep screen after inactivity. Music continues playing. Move the mouse or press a key to wake up.</p>
+        <div class="toggle-row"><span>Enable sleep mode</span><label class="toggle"><input type="checkbox" id="s-sleep-enabled" checked><span class="tog-slider"></span></label></div>
+        <label class="field-label" style="margin-top:12px">Inactivity timeout</label>
+        <select id="s-sleep-timeout" class="field">
+          <option value="30">30 seconds</option>
+          <option value="60" selected>1 minute</option>
+          <option value="120">2 minutes</option>
+          <option value="300">5 minutes</option>
+          <option value="600">10 minutes</option>
+        </select>
+
+        <div class="s-section-title" style="margin-top:20px">Focus Mode — Blocked domains</div>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:8px">One domain per line. These sites will be blocked during focus sessions.</p>
+        <textarea id="s-blocked-domains" class="field" rows="6" style="resize:vertical;font-size:12px;font-family:monospace;line-height:1.5" placeholder="youtube.com&#10;tiktok.com&#10;twitter.com&#10;instagram.com&#10;reddit.com&#10;facebook.com"></textarea>
+      </div>
+      <div class="s-section" data-section="ai">
+        <div class="s-section-title">AI</div>
+        <div class="toggle-row" style="margin-bottom:12px"><span>Show AI Chat button</span><label class="toggle"><input type="checkbox" id="s-show-ai-btn" checked><span class="tog-slider"></span></label></div>
+        <div class="toggle-row" style="margin-bottom:12px"><span>Funny loading phrases</span><label class="toggle"><input type="checkbox" id="s-ai-funny"><span class="tog-slider"></span></label></div>
+        <label class="field-label">OpenCode Zen API Key</label>
+        <div style="display:flex;gap:6px">
+          <input type="password" id="s-ai-key" class="field" style="flex:1;font-family:monospace;font-size:12px" placeholder="oc_…">
+          <button id="s-ai-key-toggle" class="btn-mini" title="Show/hide key" style="padding:6px 10px">👁</button>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:6px;letter-spacing:0.04em">Get your key at <a href="https://opencode.ai/auth" target="_blank" style="color:rgba(100,180,255,0.7)">opencode.ai/auth</a>. Encrypted and stored locally.</p>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn-secondary" id="s-ai-test-key" style="font-size:12px">Test connection</button>
+          <button class="btn-mini" id="s-ai-clear-key" style="font-size:12px;color:var(--danger)">Clear key</button>
+        </div>
+        <div id="s-ai-status" style="font-size:12px;margin-top:8px;min-height:18px"></div>
+      </div>
+      <div class="s-section" data-section="backup">
+        <div class="s-section-title">Backup &amp; Sync</div>
+        <p style="color:var(--muted);font-size:12px;margin-bottom:10px">Folders, dials and their nested content are included in SpaceDial backups.</p>
+        <button class="btn-primary" id="s-export-min" style="width:100%;margin-bottom:8px">Export minimal .json</button>
+        <button class="btn-secondary" id="s-export-full" style="width:100%;margin-bottom:8px">Export full .json</button>
+        <button class="btn-secondary" id="s-import-btn" style="width:100%;margin-bottom:8px">Import .json</button>
+        <button class="btn-secondary" id="s-import-fvd-btn" style="width:100%;margin-bottom:8px">Import FVD Speed Dial</button>
+        <textarea id="s-import-fvd-text" class="field" rows="5" style="resize:vertical;font-size:12px;font-family:monospace;line-height:1.5;margin-bottom:8px" placeholder="Paste FVD JSON or text here"></textarea>
+        <button class="btn-secondary" id="s-import-fvd-text-btn" style="width:100%;margin-bottom:16px">Import pasted FVD text</button>
+        <button class="btn-cloud" id="s-cloud-save" style="width:100%;margin-bottom:8px">Save to Chrome Cloud</button>
+        <button class="btn-secondary" id="s-cloud-load" style="width:100%;margin-bottom:8px">Load from Chrome Cloud</button>
+        <button class="btn-secondary" id="s-cloud-clear" style="width:100%;margin-bottom:16px">Clear Cloud Backup</button>
+        <button class="btn-danger" id="s-reset" style="width:100%">Reset all data</button>
+      </div>
+      <div class="s-section" data-section="updates">
+        <div class="s-section-title">Updates</div>
+        <p style="color:var(--muted);font-size:12px;margin-bottom:14px">New versions are published on GitHub. Check for updates or download the latest release manually.</p>
+        <button class="btn-secondary" id="s-check-update" style="width:100%">Check for updates</button>
+        <div id="s-update-status" style="font-size:12px;margin-top:8px;min-height:0;color:var(--muted);text-align:center"></div>
+      </div>
+    </div>
+    </div>
+    <div class="settings-footer">
+      <span class="settings-version" id="s-version">v<!-- --></span>
+      <div class="row-btns" style="margin-top:24px">
+      <button class="btn-secondary" id="s-cancel">Cancel</button>
+      <button class="btn-primary" id="s-save">Save Settings</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Developer -->
+<div id="modal-dev" class="overlay-panel" style="display:none">
+  <div class="panel-box dev-box">
+    <div class="panel-title">Developer</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span id="dev-version" style="font-size:13px;color:var(--muted)">v</span>
+      <button class="btn-mini" id="dev-reload">Reload</button>
+    </div>
+    <label class="field-label">Logs</label>
+    <textarea id="dev-logs" readonly class="field" style="height:180px;font-family:Consolas,monospace;font-size:11px;white-space:pre;overflow:auto"></textarea>
+    <div class="row-btns" style="margin:8px 0">
+      <button class="btn-secondary" id="dev-copy">Copy logs</button>
+      <button class="btn-secondary" id="dev-integrity-btn">Integrity check</button>
+      <button class="btn-secondary" id="dev-selftest-btn">Self test</button>
+    </div>
+    <div class="s-section-title" style="margin-top:10px">Earth Weather Override</div>
+    <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Manual override for Earth theme weather. Resets on page reload.</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+      <button class="btn-mini dev-weather-btn" data-effect="clear">Clear</button>
+      <button class="btn-mini dev-weather-btn" data-effect="cloudy">Clouds</button>
+      <button class="btn-mini dev-weather-btn" data-effect="rain">Rain</button>
+      <button class="btn-mini dev-weather-btn" data-effect="snow">Snow</button>
+      <button class="btn-mini dev-weather-btn" data-effect="fog">Fog</button>
+    </div>
+    <p id="dev-weather-status" style="font-size:11px;color:var(--muted);min-height:16px"></p>
+    <pre id="dev-integrity" style="max-height:140px;overflow:auto;font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-word"></pre>
+    <div class="settings-footer">
+      <button class="btn-secondary" id="dev-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import/Export + Cloud -->
+<div id="modal-ie" class="overlay-panel" style="display:none">
+  <div class="panel-box small-box">
+    <div class="panel-title">Backup &amp; Sync</div>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:14px">Local audio files are excluded from cloud sync due to size.</p>
+    <div class="ie-section-title">Local backup</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+      <button class="btn-primary" id="ie-export-min">⬇ Export minimal .json</button>
+      <button class="btn-secondary" id="ie-export-full">⬇ Export full .json</button>
+      <button class="btn-secondary" id="ie-import-btn">⬆ Import .json</button>
+      <input type="file" id="ie-import-file" accept=".json" style="display:none">
+      <button class="btn-secondary" id="ie-import-fvd-btn">⬆ Import FVD Speed Dial</button>
+      <input type="file" id="ie-import-fvd-file" accept=".json,.txt" style="display:none">
+    </div>
+    <div class="ie-section-title">Paste FVD text</div>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:10px">Paste exported FVD data directly here. No temporary file needed.</p>
+    <textarea id="ie-import-fvd-text" class="field" rows="8" style="resize:vertical;font-size:12px;font-family:monospace;line-height:1.5;margin-bottom:8px" placeholder='Paste FVD JSON or text here'></textarea>
+    <button class="btn-secondary" id="ie-import-fvd-text-btn" style="width:100%;margin-bottom:16px">Import Pasted FVD Text</button>
+    <div class="ie-section-title">Chrome Cloud Sync</div>
+    <p style="color:var(--muted);font-size:12px;margin-bottom:10px">Syncs across all Chrome instances via your Google account.</p>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+      <button class="btn-cloud" id="ie-cloud-save">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right:6px"><path d="M13 6.5a3.5 3.5 0 00-3.4-3.5 4 4 0 00-7.6 2A3 3 0 002 11h11a2.5 2.5 0 000-5z" opacity=".8"/><path d="M8 8v3M6.5 9.5L8 11l1.5-1.5" fill="none" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Save to Cloud
+      </button>
+      <button class="btn-secondary" id="ie-cloud-load">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="margin-right:6px"><path d="M13 6.5a3.5 3.5 0 00-3.4-3.5 4 4 0 00-7.6 2A3 3 0 002 11h11a2.5 2.5 0 000-5z" opacity=".5"/><path d="M8 12V9M6.5 10.5L8 9l1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Load from Cloud
+      </button>
+      <button class="btn-secondary" id="ie-cloud-clear">Clear Cloud Backup</button>
+    </div>
+    <button class="btn-danger" id="ie-reset" style="width:100%">⚠ Reset all data</button>
+    <div class="row-btns" style="margin-top:16px"><button class="btn-secondary" id="ie-close">Close</button></div>
+  </div>
+</div>
+
+<!-- Focus Mode -->
+<div id="modal-focus" class="overlay-panel" style="display:none">
+  <div class="panel-box focus-box">
+    <div class="panel-title">Focus Mode</div>
+    <div id="focus-active" style="display:none;text-align:center;padding:8px 0 16px">
+      <div id="focus-timer-display"></div>
+      <div id="focus-session-label" style="color:var(--muted);font-size:13px;margin-top:4px"></div>
+      <button class="btn-danger" id="focus-stop-btn" style="margin-top:16px">End Focus Session</button>
+    </div>
+    <div id="focus-setup">
+      <label class="field-label">Session name (optional)</label>
+      <input type="text" id="focus-name-inp" class="field" placeholder="Deep work, Study…">
+      <label class="field-label" style="margin-top:14px">Duration</label>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input type="number" id="focus-duration" class="field" value="25" min="1" max="480" style="width:75px">
+        <span style="color:var(--muted);font-size:14px">min</span>
+        <button class="focus-preset" data-min="25">25m</button>
+        <button class="focus-preset" data-min="45">45m</button>
+        <button class="focus-preset" data-min="60">1h</button>
+        <button class="focus-preset" data-min="90">90m</button>
+      </div>
+      <label class="field-label" style="margin-top:16px">Block these groups</label>
+      <div id="focus-group-list"></div>
+      <p style="color:var(--muted);font-size:12px;margin-top:5px">Blocked dials show a reminder instead of opening.</p>
+      <div class="toggle-row" style="margin-top:12px">
+        <span>Show countdown bar</span>
+        <label class="toggle"><input type="checkbox" id="focus-show-timer" checked><span class="tog-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span>Hard block (no override)</span>
+        <label class="toggle"><input type="checkbox" id="focus-hard-block"><span class="tog-slider"></span></label>
+      </div>
+      <div class="row-btns" style="margin-top:20px">
+        <button class="btn-secondary" id="focus-cancel">Cancel</button>
+        <button class="btn-primary" id="focus-start-btn">Start Focus</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Blocked dial toast -->
+<div id="focus-blocked-toast" style="display:none">
+  <span id="focus-blocked-msg"></span>
+  <button id="focus-blocked-override">Override</button>
+</div>
+
+<div id="backup-toast" style="display:none">
+  <span>Changes detected. Save backup file?</span>
+  <button id="backup-toast-later">Later</button>
+  <button id="backup-toast-save">Save</button>
+</div>
+
+<div id="update-toast" style="display:none">
+  <span id="update-toast-msg">New version available</span>
+  <button id="update-toast-later">Later</button>
+  <button id="update-toast-download">Download</button>
+</div>
+
+<div id="speedtest-panel" style="display:none">
+  <button id="speedtest-panel-close" title="Close SpeedTest">✕</button>
+  <iframe id="speedtest-frame" title="SpaceDial SpeedTest" loading="lazy"></iframe>
+</div>
+
+<div id="ai-panel" style="display:none">
+  <button id="ai-panel-close" title="Close AI Chat">✕</button>
+  <iframe id="ai-frame" title="SpaceDial AI Chat" loading="lazy"></iframe>
+</div>
+
+<!-- Earth sim-time control (bottom-left) -->
+<div id="earth-time-panel" style="display:none">
+  <button id="earth-time-toggle" title="Toggle time control">🕐</button>
+  <div id="earth-time-box">
+    <label>Simulated time <button id="earth-time-now" title="Back to real time">now</button></label>
+    <input type="datetime-local" id="earth-time-input" step="1">
+    <div class="earth-time-presets">
+      <span>Eclipses:</span>
+      <button data-ts="2027-08-02T18:00">2027-08-02</button>
+      <button data-ts="2026-08-12T23:00">2026-08-12</button>
+    </div>
+  </div>
+</div>
+
+<!-- Default-theme quick time & eclipse control (bottom-left) -->
+<div id="sky-time-panel" style="display:none">
+  <button id="sky-time-toggle" title="Toggle time of day / eclipse">☀</button>
+  <div id="sky-time-box">
+    <div class="sky-quick-presets">
+      <span>Time of day:</span>
+      <button data-sky="0">Night</button>
+      <button data-sky="7">Morning</button>
+      <button data-sky="12">Day</button>
+      <button data-sky="17">Evening</button>
+      <button data-sky="now">Now</button>
+    </div>
+    <div class="sky-eclipse-row">
+      <span>Solar eclipse:</span>
+      <button id="sky-eclipse-now" title="Simulate the next real solar eclipse">Preview</button>
+      <button id="sky-eclipse-clear" title="Clear eclipse preview">Clear</button>
+    </div>
+    <div id="sky-eclipse-status">Next: …</div>
+  </div>
+</div>
+
+<script src="console-capture.js"></script>
+<script src="Themes/earth/three.min.js"></script>
+<script src="Themes/earth/earth-theme.js"></script>
+<script src="Themes/earth/earth-weather.js"></script>
+<script src="Themes/galaxy/galaxy-theme.js"></script>
+<script src="newtab.js"></script>
+</body>
+</html>

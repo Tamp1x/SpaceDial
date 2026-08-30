@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SpeedTest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+:root {
+  --text:#f0f0f0; --muted:rgba(255,255,255,0.3);
+  --ring:rgba(255,255,255,0.12); --ring-fill:#fff;
+  --glow:rgba(255,255,255,0.06); --go:#fff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{
+  width:100%;height:100%;overflow:hidden;
+  font-family:'Rajdhani',sans-serif;
+  display:flex;align-items:flex-start;justify-content:center;
+  padding-top:12px;
+}
+
+.wrap{
+  display:flex;flex-direction:column;align-items:center;
+  gap:12px;padding:10px 14px;width:100%;max-width:340px;
+}
+
+.circle{
+  position:relative;width:130px;height:130px;cursor:pointer;flex-shrink:0;
+}
+.circle svg{width:100%;height:100%;transform:rotate(-90deg)}
+.circle-bg{fill:none;stroke:var(--ring);stroke-width:4;transition:stroke .3s}
+.circle-fill{
+  fill:none;stroke:var(--ring-fill);stroke-width:4;stroke-linecap:round;
+  stroke-dasharray:345.58;stroke-dashoffset:345.58;
+  transition:stroke-dashoffset .1s linear,stroke .3s;
+  filter:drop-shadow(0 0 6px var(--glow));
+}
+.circle-in{
+  position:absolute;inset:0;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  border-radius:50%;user-select:none;
+  backdrop-filter:blur(12px);
+  background:rgba(255,255,255,0.03);
+  transition:background .2s;
+}
+.circle:hover .circle-in{background:rgba(255,255,255,0.06)}
+.circle:active .circle-in{transform:scale(.96)}
+.go-text{
+  font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:.06em;
+  color:var(--go);transition:color .3s;
+}
+.speed-text{
+  font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:.04em;
+  color:var(--text);line-height:1;display:none;transition:color .3s;
+}
+.speed-unit{
+  font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--muted);display:none;transition:color .3s;
+}
+
+.res{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%}
+.r{text-align:center;padding:6px 8px}
+.r .lbl{font-size:9px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);transition:color .3s}
+.r .num{font-family:'Bebas Neue',sans-serif;font-size:26px;letter-spacing:.04em;color:var(--text);line-height:1.2;transition:color .3s}
+.r .suf{font-size:10px;color:var(--muted);letter-spacing:.06em;transition:color .3s}
+.r-ping{grid-column:1/-1;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:8px;padding:0}
+.r-ping .lbl{font-size:9px}
+.r-ping .num{font-size:16px}
+.r-ping .suf{font-size:10px}
+
+.status{font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);min-height:1.3em;transition:color .3s}
+
+@keyframes pulse{0%,100%{opacity:.2}50%{opacity:1}}
+.loading{animation:pulse .9s ease-in-out infinite}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="circle" id="btn">
+    <svg viewBox="0 0 110 110">
+      <circle class="circle-bg" cx="55" cy="55" r="50"/>
+      <circle class="circle-fill" id="gauge-fill" cx="55" cy="55" r="50"/>
+    </svg>
+    <div class="circle-in" id="btn-in">
+      <div class="go-text" id="go-text">GO</div>
+      <div class="speed-text" id="speed-text"></div>
+      <div class="speed-unit" id="speed-unit">Mbps</div>
+    </div>
+  </div>
+
+  <div class="res">
+    <div class="r">
+      <div class="lbl">Download</div>
+      <div class="num" id="m-down">—</div>
+      <div class="suf">Mbps</div>
+    </div>
+    <div class="r">
+      <div class="lbl">Upload</div>
+      <div class="num" id="m-up">—</div>
+      <div class="suf">Mbps</div>
+    </div>
+    <div class="r r-ping">
+      <div class="lbl">Ping</div>
+      <div class="num" id="m-ping">—</div>
+      <div class="suf">ms</div>
+    </div>
+  </div>
+
+  <div class="status" id="status">Ready</div>
+
+</div>
+<script src="speedtest.js"></script>
+</body>
+</html>

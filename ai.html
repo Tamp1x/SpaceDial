@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Chat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="ai.css">
+</head>
+<body>
+  <div id="ai-root">
+  <button id="ai-sidebar-toggle" title="Chat history">☰</button>
+  <div id="ai-sidebar">
+    <div id="ai-sidebar-header">
+      <span>Chats</span>
+      <button id="ai-new-chat-btn" title="New chat">＋</button>
+    </div>
+    <div id="ai-chat-list"></div>
+    <div id="ai-sidebar-footer">
+      <button id="ai-model-settings-btn" title="Visible models">⚙</button>
+    </div>
+  </div>
+  <div id="ai-main">
+    <div id="ai-header">
+      <div id="ai-model-selector">
+        <span id="ai-model-current">Select model…</span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 4l3 3 3-3"/></svg>
+      </div>
+      <div id="ai-model-dropdown" style="display:none">
+        <div id="ai-model-search-wrap"><input id="ai-model-search" type="text" placeholder="Search models…"></div>
+        <div id="ai-model-list"></div>
+      </div>
+    </div>
+    <div id="ai-messages"></div>
+    <div id="ai-input-area">
+      <div id="ai-attach-bar" style="display:none"></div>
+      <div id="ai-input-row">
+        <button id="ai-attach-btn" title="Attach file">＋</button>
+        <textarea id="ai-input" rows="1" placeholder="Type a message…"></textarea>
+        <button id="ai-send-btn" title="Send">➤</button>
+      </div>
+    </div>
+    <input type="file" id="ai-file-input" multiple style="display:none">
+  </div>
+</div>
+
+<!-- Model visibility settings popup -->
+<div id="ai-model-settings-overlay" style="display:none">
+  <div id="ai-model-settings-popup">
+    <div id="ai-model-settings-header">
+      <span>Visible models</span>
+      <button id="ai-model-settings-close">✕</button>
+    </div>
+    <div id="ai-model-settings-body"></div>
+  </div>
+</div>
+
+<!-- API key prompt -->
+<div id="ai-key-overlay" style="display:none">
+  <div id="ai-key-popup">
+    <div id="ai-key-header">API Key Required</div>
+    <p style="font-size:13px;color:rgba(255,255,255,0.5);margin-bottom:12px;line-height:1.5">Enter your <strong style="color:rgba(255,255,255,0.7)">OpenCode Zen</strong> API key to start chatting. Get your key at <a href="https://opencode.ai/auth" target="_blank" style="color:rgba(100,180,255,0.7)">opencode.ai/auth</a>.</p>
+    <input type="password" id="ai-key-input" placeholder="oc_…" style="width:100%;margin-bottom:10px">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="ai-key-btn" id="ai-key-save">Save key</button>
+    </div>
+    <div id="ai-key-error" style="font-size:12px;color:rgba(255,100,100,0.7);margin-top:8px;display:none"></div>
+  </div>
+</div>
+
+<!-- Tool confirmation prompt -->
+<div id="ai-confirm-overlay" style="display:none">
+  <div id="ai-confirm-popup">
+    <div id="ai-confirm-header">Confirm Action</div>
+    <div id="ai-confirm-body"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+      <button class="ai-key-btn" id="ai-confirm-deny" style="background:rgba(255,80,80,0.15);color:rgba(255,120,120,0.9)">Deny</button>
+      <button class="ai-key-btn" id="ai-confirm-allow">Allow</button>
+    </div>
+  </div>
+</div>
+
+<script src="ai.js"></script>
+</body>
+</html>
