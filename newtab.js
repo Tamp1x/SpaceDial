@@ -58,7 +58,8 @@ const DEFAULT_STATE = () => ({
     wallpaperY: 50,
     wallpaperBlur: false,
     sleepEnabled: true,
-    sleepTimeout: 60
+    sleepTimeout: 60,
+    sleepColorGlow: false
   },
   notes: '',
   player: {
@@ -96,6 +97,8 @@ let weatherAnimationFrame = null;
 let galaxyAnimationFrame = null;
 let starsResizeTimer = null;
 let lastWeatherAtmosphere = null;
+let lastWeatherDesc = '';
+let lastWeatherTemp = '';
 const MODAL_CLOSE_MS = 280;
 const CLOCK_ANIM_MS = 420;
 const AUTO_BACKUP_DEBOUNCE_MS = 1800;
@@ -144,6 +147,10 @@ let sleepPlanetRadius = 0;
 // ─── Init ───────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   await loadState();
+  chrome.storage.local.get(['lastWeatherDesc', 'lastWeatherTemp'], r => {
+    if (r.lastWeatherDesc) lastWeatherDesc = r.lastWeatherDesc;
+    if (r.lastWeatherTemp) lastWeatherTemp = r.lastWeatherTemp;
+  });
   installConsoleCommands();
   sessionStorage.removeItem('dev-earth-override');
   // Establish baseline so prompt does not appear right after startup.
@@ -687,7 +694,17 @@ function installConsoleCommands() {
     },
     previewEclipse() { eclipsePreview = 0.85; applySettings(); return true; },
     clearEclipse() { eclipsePreview = 0; applySettings(); return true; },
-    clearWallpaper() { selectWallpaper(null); saveState(); applySettings(); return true; }
+    clearWallpaper() { selectWallpaper(null); saveState(); applySettings(); return true; },
+    setSleepTime(hour) {
+      const value = Number(hour);
+      if (!Number.isFinite(value) || value < 0 || value > 23) throw new Error('Hour must be between 0 and 23');
+      window.__sleepDebugHour = value;
+      return `Sleep glow locked to ${value}:00`;
+    },
+    setSleepAutoTime() {
+      window.__sleepDebugHour = undefined;
+      return 'Sleep glow returned to automatic mode';
+    }
   };
   window.SpaceDial = api;
   window.spacedial = api;
@@ -1318,6 +1335,7 @@ function finishSleepExit() {
   sleepActive = false;
   sleepFadePhase = 'none';
   sleepFadeAlpha = 0;
+  clearTimeout(sleepAnimId);
   cancelAnimationFrame(sleepAnimId);
   sleepAnimId = null;
   sleepCanvas.style.display = 'none';
@@ -1356,7 +1374,14 @@ function drawSleepFrame(now) {
   }
 
   drawSleepScene(now);
-  sleepAnimId = requestAnimationFrame(drawSleepFrame);
+
+  if (sleepFadePhase !== 'none') {
+    sleepAnimId = requestAnimationFrame(drawSleepFrame);
+  } else {
+    sleepAnimId = setTimeout(() => {
+      sleepAnimId = requestAnimationFrame(drawSleepFrame);
+    }, 1000);
+  }
 }
 
 function drawSleepScene(now) {
@@ -1366,6 +1391,7 @@ function drawSleepScene(now) {
   const cy = h / 2;
   const r = sleepPlanetRadius;
   const ctx = sleepCtx;
+  const colorGlow = state.settings.sleepColorGlow;
 
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = '#000';
@@ -1378,10 +1404,20 @@ function drawSleepScene(now) {
     ctx.fill();
   }
 
+  let glowR = 255, glowG = 255, glowB = 255;
+  if (colorGlow) {
+    const hour = window.__sleepDebugHour !== undefined ? window.__sleepDebugHour : new Date().getHours();
+    if (hour >= 0 && hour < 5)       { glowR = 25;  glowG = 40;  glowB = 100; }
+    else if (hour >= 5 && hour < 8)  { glowR = 255; glowG = 140; glowB = 50;  }
+    else if (hour >= 8 && hour < 17) { glowR = 170; glowG = 210; glowB = 255; }
+    else if (hour >= 17 && hour < 20){ glowR = 255; glowG = 100; glowB = 80;  }
+    else                             { glowR = 40;  glowG = 50;  glowB = 120; }
+  }
+
   const glowGrad = ctx.createRadialGradient(cx, cy, r * 0.85, cx, cy, r * 2.5);
-  glowGrad.addColorStop(0, 'rgba(255,255,255,0.18)');
-  glowGrad.addColorStop(0.2, 'rgba(220,225,255,0.10)');
-  glowGrad.addColorStop(0.5, 'rgba(180,195,240,0.04)');
+  glowGrad.addColorStop(0, `rgba(${glowR},${glowG},${glowB},0.18)`);
+  glowGrad.addColorStop(0.2, `rgba(${glowR},${glowG},${glowB},0.10)`);
+  glowGrad.addColorStop(0.5, `rgba(${glowR},${glowG},${glowB},0.04)`);
   glowGrad.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = glowGrad;
   ctx.beginPath();
@@ -1396,25 +1432,48 @@ function drawSleepScene(now) {
   ctx.lineWidth = 1;
   ctx.stroke();
 
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
   const now2 = new Date();
   const hh = String(now2.getHours()).padStart(2, '0');
   const mm = String(now2.getMinutes()).padStart(2, '0');
   const timeStr = `${hh}:${mm}`;
-  const fontSize = Math.max(32, r * 0.45);
-  ctx.font = `300 ${fontSize}px 'Rajdhani', sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  const fontSize = Math.max(36, r * 0.42);
+
+  const weatherY = cy - fontSize * 0.7;
+  const clockY = cy;
+  const dateY = cy + fontSize * 0.65;
+  const hintY = cy + fontSize * 1.2;
+
+  if (lastWeatherDesc) {
+    const weatherStr = lastWeatherDesc + '  ' + lastWeatherTemp;
+    const weatherSize = Math.max(11, r * 0.10);
+    ctx.font = `300 ${weatherSize}px 'SF Pro Rounded', sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.30)';
+    ctx.fillText(weatherStr, cx, weatherY);
+  }
+
+  ctx.font = `300 ${fontSize}px 'SF Pro Rounded', sans-serif`;
   ctx.fillStyle = `rgba(255,255,255,${0.8 + Math.sin(now * 0.001) * 0.08})`;
-  ctx.shadowColor = 'rgba(200,220,255,0.35)';
+  ctx.shadowColor = `rgba(${glowR},${glowG},${glowB},0.35)`;
   ctx.shadowBlur = 14;
-  ctx.fillText(timeStr, cx, cy);
+  ctx.fillText(timeStr, cx, clockY);
   ctx.shadowBlur = 0;
 
+  const days = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
+  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const dateStr = `${days[now2.getDay()]},  ${now2.getDate()} ${months[now2.getMonth()]}`;
+  const dateSize = Math.max(10, r * 0.10);
+  ctx.font = `300 ${dateSize}px 'SF Pro Rounded', sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.fillText(dateStr, cx, dateY);
+
   const hint = 'move mouse or press any key to wake up';
-  ctx.font = `300 ${Math.max(10, r * 0.08)}px 'Rajdhani', sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
-  ctx.fillText(hint, cx, cy + fontSize * 0.7);
+  const hintSize = Math.max(8, r * 0.06);
+  ctx.font = `100 ${hintSize}px 'SF Pro Rounded', sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.fillText(hint, cx, hintY);
 }
 
 // ─── Weather atmosphere ─────────────────────────────────────
@@ -1768,6 +1827,9 @@ async function fetchWeather() {
     const temp = Math.round(wd.current.temperature_2m);
     const code = Number(wd.current.weather_code ?? wd.current.weathercode ?? 0);
     const isNight = Number(wd.current?.is_day) === 0;
+    lastWeatherDesc = wmoDesc(code);
+    lastWeatherTemp = temp + (unit === 'fahrenheit' ? '°F' : '°C');
+    chrome.storage.local.set({ lastWeatherDesc, lastWeatherTemp });
     updateAtmosphereFromWeather(wd);
     if (state.settings.showWeather) {
       document.getElementById('weather-city').textContent = `${name.toUpperCase()}, ${country.toUpperCase()}`;
@@ -3008,6 +3070,7 @@ function openSettings(triggerEl) {
   document.getElementById('s-blocked-domains').value = s.blockedDomains || '';
   document.getElementById('s-sleep-enabled').checked = s.sleepEnabled !== false;
   document.getElementById('s-sleep-timeout').value = String(s.sleepTimeout || 60);
+  document.getElementById('s-sleep-color-glow').checked = s.sleepColorGlow === true;
   chrome.storage.local.get('ai-funny-thinking', r => { document.getElementById('s-ai-funny').checked = !!r['ai-funny-thinking']; });
 
   // Wallpaper settings
@@ -3208,6 +3271,7 @@ async function saveSettings() {
   s.blockedDomains = document.getElementById('s-blocked-domains').value;
   s.sleepEnabled = document.getElementById('s-sleep-enabled').checked;
   s.sleepTimeout = parseInt(document.getElementById('s-sleep-timeout').value) || 60;
+  s.sleepColorGlow = document.getElementById('s-sleep-color-glow').checked;
 
   // Wallpaper settings
   s.wallpaperFit = document.querySelector('input[name="wallpaper-fit"]:checked')?.value || 'cover';
@@ -4514,6 +4578,7 @@ function initWallpaperControls() {
 
   const sleepEnabledEl = document.getElementById('s-sleep-enabled');
   const sleepTimeoutEl = document.getElementById('s-sleep-timeout');
+  const sleepColorGlowEl = document.getElementById('s-sleep-color-glow');
   if (sleepEnabledEl) sleepEnabledEl.addEventListener('change', () => {
     state.settings.sleepEnabled = sleepEnabledEl.checked;
     if (sleepActive && sleepEnabledEl.checked) resetSleepTimer();
@@ -4522,6 +4587,9 @@ function initWallpaperControls() {
   if (sleepTimeoutEl) sleepTimeoutEl.addEventListener('change', () => {
     state.settings.sleepTimeout = parseInt(sleepTimeoutEl.value) || 60;
     resetSleepTimer();
+  });
+  if (sleepColorGlowEl) sleepColorGlowEl.addEventListener('change', () => {
+    state.settings.sleepColorGlow = sleepColorGlowEl.checked;
   });
 }
 

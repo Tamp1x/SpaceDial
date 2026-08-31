@@ -7,6 +7,29 @@
   font-display: swap;
 }
 
+/* ─── SF Pro Rounded (bundled) ─────────────────────────────── */
+@font-face {
+  font-family: 'SF Pro Rounded';
+  src: url('fonts/SFProRounded-Thin.woff2') format('woff2');
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'SF Pro Rounded';
+  src: url('fonts/SFProRounded-Light.woff2') format('woff2');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'SF Pro Rounded';
+  src: url('fonts/SFProRounded-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ─── Reset & Variables ───────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

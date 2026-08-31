@@ -34,4 +34,16 @@ SpaceDial.clearEclipse()
 Убрать сохранённые обои и вернуть динамическое небо:
 SpaceDial.clearWallpaper()
 
+--- Режим сна (Sleep Mode) ---
+
+Установить время суток для тестирования цветного свечения (0-23):
+SpaceDial.setSleepTime(0)   -- ночь (тёмно-синее)
+SpaceDial.setSleepTime(6)   -- рассвет (оранжевое)
+SpaceDial.setSleepTime(12)  -- день (голубое)
+SpaceDial.setSleepTime(18)  -- вечер (красно-оранжевое)
+SpaceDial.setSleepTime(22)  -- поздний вечер (тёмно-синее)
+
+Вернуть автоматический режим (текущее реальное время):
+SpaceDial.setSleepAutoTime()
+
 Если команды не определены, обновите страницу после полного перезапуска расширения.
